@@ -14,13 +14,21 @@ Browser – kein Build, kein Server, kein Konto, keine Netzwerkzugriffe.
 
 ## Starten
 
-Die Seite ist statisch. Entweder `index.html` direkt im Browser öffnen oder – wegen
-der ES-Module sauberer – kurz einen lokalen Server starten:
+Die Seite ist statisch, braucht aber einen HTTP-Server: Die Spiele werden als
+ES-Module nachgeladen, und die blockiert der Browser über `file://`. Ein
+Doppelklick auf `index.html` zeigt deshalb nur eine leere Seite.
 
 ```bash
+git clone https://github.com/leohoffmannschule-collab/games_for_work.git
+cd games_for_work
 python3 -m http.server 8000
 # danach http://localhost:8000 aufrufen
 ```
+
+`npx serve` oder jeder andere statische Server tut es genauso. Zum Veröffentlichen
+reicht jeder Webspace, der Dateien ausliefert – etwa GitHub Pages: unter
+*Settings → Pages* als Quelle „Deploy from a branch" wählen, Branch und Ordner `/`
+setzen, fertig. Es muss nichts gebaut werden.
 
 ## Aufbau
 
