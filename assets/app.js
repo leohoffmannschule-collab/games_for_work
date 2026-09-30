@@ -26,6 +26,10 @@ const icon = {
     <rect x="15.5" y="6" width="6" height="12" rx="1.8"/></svg>`,
   snake: `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
     <path d="M4 18h6a3 3 0 0 0 0-6H8a3 3 0 0 1 0-6h7"/><circle cx="18.5" cy="6" r="2.2" fill="currentColor"/></svg>`,
+  dash: `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round">
+    <rect x="3" y="5.5" width="7" height="7" rx="1.6" transform="rotate(-18 6.5 9)" fill="currentColor" opacity=".22"/>
+    <rect x="3" y="5.5" width="7" height="7" rx="1.6" transform="rotate(-18 6.5 9)"/>
+    <path d="M13 19l2.6-5 2.6 5z"/><path d="M2.5 19h19" stroke-linecap="round"/></svg>`,
 };
 
 /* ------------------------------------------------------------- Register -- */
@@ -93,6 +97,22 @@ const GAMES = [
     headline: () => {
       const b = store.best('snake', 'klassisch');
       return b ? `Bester Punktestand <strong>${b}</strong>` : 'Noch kein Punktestand';
+    },
+  },
+  {
+    id: 'dash',
+    title: 'Dash',
+    time: '5–15 Min',
+    icon: icon.dash,
+    desc: 'Ein Würfel, drei Strecken, ein Knopf. Springen im Takt – und nach jedem Sturz sofort weiter.',
+    load: () => import('./games/dash.js'),
+    headline: () => {
+      const fertig = store.get('dash:geschafft', []).length;
+      if (fertig) {
+        return `<strong>${fertig}</strong> ${fertig === 1 ? 'Strecke' : 'Strecken'} geschafft`;
+      }
+      const b = store.best('dash', 'aufwaermen');
+      return b ? `Aufwärmen bis <strong>${b} %</strong>` : 'Noch nicht gelaufen';
     },
   },
 ];
@@ -202,7 +222,7 @@ function renderHub() {
 
   view.innerHTML = `
     <section class="hero">
-      <h1>Fünf Spiele für die Pause</h1>
+      <h1>Sechs Spiele für die Pause</h1>
       <p>Kurz genug für den Kaffee, lang genug für den Kopf. Alles läuft im Browser,
          ohne Konto und ohne Netz – Punktestände bleiben nur auf diesem Gerät.</p>
     </section>

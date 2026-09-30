@@ -34,7 +34,7 @@ export function createGame(ctx) {
     </div>
     <div class="snake-wrap">
       <canvas class="snake-canvas" id="cv" width="600" height="600"></canvas>
-      <div class="snake-overlay" id="overlay" hidden></div>
+      <div class="play-overlay" id="overlay" hidden></div>
     </div>
     <div class="keyhint">
       <kbd>↑</kbd> <kbd>↓</kbd> <kbd>←</kbd> <kbd>→</kbd> oder <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> ·

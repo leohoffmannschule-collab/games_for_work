@@ -1,6 +1,6 @@
 # Pausenspiele
 
-Ein kleiner Spiele-Hub für die Arbeitspause: fünf Spiele, die in 5 bis 20 Minuten
+Ein kleiner Spiele-Hub für die Arbeitspause: sechs Spiele, die in 5 bis 20 Minuten
 durchgespielt sind und sich jederzeit stehen lassen lassen. Alles läuft rein im
 Browser – kein Build, kein Server, kein Konto, keine Netzwerkzugriffe.
 
@@ -11,6 +11,7 @@ Browser – kein Build, kein Server, kein Konto, keine Netzwerkzugriffe.
 | **Sudoku** | 10–20 Min | Selbst erzeugte Rätsel mit garantiert eindeutiger Lösung, Notizen, Tipp, Prüfung. |
 | **Wortjagd** | 3–8 Min | Deutsches Wörterraten: fünf Buchstaben, sechs Versuche, 557 Wörter. |
 | **Snake** | 2–5 Min | Der Klassiker, wahlweise mit tödlichen oder offenen Wänden. |
+| **Dash** | 5–15 Min | Hüpfspiel nach Art von Geometry Dash: drei Strecken, ein Knopf, sofortiger Neustart. |
 
 ## Starten
 
@@ -45,7 +46,10 @@ assets/
     wortjagd.js         Wörterraten
     woerter.js          Wörterliste (557 Wörter mit fünf Buchstaben)
     snake.js            Snake
+    dash.js             Dash inkl. Physik, Strecken und Zeichenroutine
 build.mjs               erzeugt dist/index.html für Hosts ohne <head>/<body>
+tools/
+  strecken-pruefen.mjs  prüft die Dash-Strecken auf Lösbarkeit und Fairness
 ```
 
 Der Hub ist eine kleine Single-Page-App: ein Klick setzt den Hash, der Router lädt
@@ -71,6 +75,24 @@ einen Eintrag in der `GAMES`-Liste in `assets/app.js` ergänzen.
 - **Sudoku**: Der Generator baut erst ein volles Gitter und entfernt dann
   symmetrische Paare, solange die Lösung eindeutig bleibt. Jedes Rätsel ist damit
   ohne Raten lösbar.
+- **Dash**: Kein Ton – das Spiel funktioniert bewusst auch bei stummem Rechner.
+  Die Strecken stehen als Zeichenzeilen in `assets/games/dash.js` (`^` Stachel,
+  `#` Block, unterste Zeile auf dem Boden) und lassen sich dort direkt ändern.
+
+## Strecken prüfen
+
+Nach jeder Änderung an den Dash-Strecken:
+
+```bash
+node tools/strecken-pruefen.mjs
+```
+
+Weil pro Zeitschritt nur „springen oder nicht" zur Wahl steht, lassen sich alle
+erreichbaren Zustände vollständig aufzählen. Das Skript prüft damit zweierlei:
+ob die Strecke überhaupt zu schaffen ist, und wie viel Zeitspielraum der engste
+Pflichtsprung lässt. Unter 60 ms gilt als unfair und lässt den Lauf scheitern –
+eine Strecke mit einem unmöglichen Sprung sieht im Quelltext genauso harmlos aus
+wie eine faire.
 
 ## Formatierung
 
