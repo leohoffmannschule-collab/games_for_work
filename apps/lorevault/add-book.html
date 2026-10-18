@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <link rel="stylesheet" href="vendor/fonts/fonts.css" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>LoreVault – Buch hinzufügen</title>
+  <link rel="stylesheet" href="css/style.css" />
+  
+  <script src="vendor/pdfjs/pdf.min.js"></script>
+  <link rel="stylesheet" href="vendor/bootstrap-icons/bootstrap-icons.min.css">
+</head>
+<body>
+
+<!-- NAVBAR -->
+<nav class="navbar">
+  <div class="nav-brand">
+    <a href="index.html" style="text-decoration:none;display:flex;align-items:center;gap:.5rem;color:inherit">
+      <span class="nav-logo">⬡</span>
+      <span class="nav-title">LoreVault</span>
+    </a>
+  </div>
+  <div class="nav-links">
+    <a href="index.html" class="nav-link"><i class="bi bi-house-door"></i> Bibliothek</a>
+    <a href="add-book.html" class="nav-link active"><i class="bi bi-plus-circle"></i> Buch hinzufügen</a>
+  </div>
+</nav>
+
+<main class="container" style="padding-top:2rem;">
+  <div class="form-card">
+    <h2 class="form-title"><i class="bi bi-book"></i> Neues Buch einpflegen</h2>
+    <p class="form-hint">Lege die PDF-Datei in den <code>books/</code> Ordner neben der <code>index.html</code> und trage den Dateinamen unten ein.</p>
+
+    <form id="addBookForm" autocomplete="off">
+
+      <!-- PDF Dateiname -->
+      <div class="form-group">
+        <label for="pdfFilename">PDF-Dateiname <span class="req">*</span></label>
+        <div class="input-with-prefix">
+          <span class="prefix">books/</span>
+          <input type="text" id="pdfFilename" placeholder="meinbuch.pdf" required />
+        </div>
+        <small>Die Datei muss im <code>books/</code> Ordner liegen.</small>
+      </div>
+
+      <!-- Titel -->
+      <div class="form-group">
+        <label for="bookTitle">Titel <span class="req">*</span></label>
+        <input type="text" id="bookTitle" placeholder="z.B. Der Herr der Ringe" required />
+      </div>
+
+      <!-- Autor -->
+      <div class="form-group">
+        <label for="bookAuthor">Autor</label>
+        <input type="text" id="bookAuthor" placeholder="z.B. J.R.R. Tolkien" />
+      </div>
+
+      <!-- Beschreibung -->
+      <div class="form-group">
+        <label for="bookDesc">Beschreibung / Klappentext</label>
+        <textarea id="bookDesc" rows="4" placeholder="Kurze Zusammenfassung des Buches…"></textarea>
+      </div>
+
+      <!-- Genre Tags -->
+      <div class="form-group">
+        <label for="bookGenre">Genre (Komma-getrennt)</label>
+        <input type="text" id="bookGenre" placeholder="Fantasy, Abenteuer, Klassiker" />
+      </div>
+
+      <!-- Cover -->
+      <div class="form-group">
+        <label>Cover-Bild</label>
+        <div class="cover-options">
+          <div class="cover-tab-btns">
+            <button type="button" class="cover-tab-btn active" data-tab="file">Datei hochladen</button>
+            <button type="button" class="cover-tab-btn" data-tab="url">URL eingeben</button>
+            <button type="button" class="cover-tab-btn" data-tab="none">Kein Cover</button>
+          </div>
+          <div class="cover-tab active" id="coverTab-file">
+            <input type="file" id="coverFile" accept="image/*" />
+            <small>JPG, PNG, WebP — wird als Base64 gespeichert</small>
+          </div>
+          <div class="cover-tab" id="coverTab-url">
+            <input type="text" id="coverUrl" placeholder="https://..." />
+          </div>
+          <div class="cover-tab" id="coverTab-none">
+            <p style="opacity:.6;font-size:.9rem;">Ein generisches Cover wird angezeigt.</p>
+          </div>
+        </div>
+        <div class="cover-preview-wrap">
+          <img id="coverPreview" src="" alt="Cover-Vorschau" style="display:none;" />
+        </div>
+      </div>
+
+      <!-- Kapitel-Erkennung -->
+      <div class="form-group">
+        <label>Kapitel-Erkennung</label>
+        <div class="chapter-settings">
+
+          <!-- Modus-Auswahl -->
+          <div style="display:flex;flex-direction:column;gap:.6rem;margin-bottom:.8rem;">
+
+            <label class="toggle-label">
+              <input type="radio" name="chapterMode" id="modeAuto" value="auto" checked />
+              <span>
+                <strong style="color:var(--text-primary);">Automatisch</strong>
+                <span style="display:block;font-size:.85rem;opacity:.7;margin-top:.1rem;">Erkennt Überschriften anhand von Schriftgröße, Fettschrift und Standard-Schlüsselwörtern (Kapitel, Chapter, Teil …)</span>
+              </span>
+            </label>
+
+            <label class="toggle-label">
+              <input type="radio" name="chapterMode" id="modeCustom" value="custom" />
+              <span>
+                <strong style="color:var(--text-primary);">Eigene Schlüsselwörter + automatisch</strong>
+                <span style="display:block;font-size:.85rem;opacity:.7;margin-top:.1rem;">Wie automatisch, aber mit deinen Schlüsselwörtern statt der Standard-Liste</span>
+              </span>
+            </label>
+
+            <label class="toggle-label">
+              <input type="radio" name="chapterMode" id="modeKeywordOnly" value="keyword-only" />
+              <span>
+                <strong style="color:var(--text-primary);">Nur Schlüsselwörter</strong>
+                <span style="display:block;font-size:.85rem;opacity:.7;margin-top:.1rem;">Erkennt <em>ausschließlich</em> Zeilen die mit deinen Schlüsselwörtern beginnen – ignoriert Schriftgröße und Formatierung</span>
+              </span>
+            </label>
+
+          </div>
+
+          <!-- Schlüsselwort-Eingabe (eingeblendet bei custom + keyword-only) -->
+          <div id="customHeadingsWrap" style="display:none;margin-top:.4rem;">
+            <input type="text" id="headingKeywords" placeholder="Kapitel, Chapter, Teil, Part, Abschnitt" />
+            <small>Komma-getrennt. Groß-/Kleinschreibung egal.</small>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- Vorschau / Analyse -->
+      <div class="form-group">
+        <button type="button" id="analyzeBtn" class="btn btn-secondary">
+          <i class="bi bi-search"></i> PDF analysieren &amp; Kapitel-Vorschau
+        </button>
+        <div id="analyzeStatus"></div>
+        <div id="chapterPreview" class="chapter-preview-list"></div>
+      </div>
+
+      <!-- Submit -->
+      <div class="form-actions">
+        <a href="index.html" class="btn btn-ghost">Abbrechen</a>
+        <button type="submit" class="btn btn-primary" id="saveBtn" disabled>
+          <i class="bi bi-save"></i> Buch speichern
+        </button>
+      </div>
+
+    </form>
+  </div>
+</main>
+
+<footer class="site-footer">
+  <span>LoreVault &copy; 2025 &mdash; Lokale Bibliothek</span>
+</footer>
+
+
+<script src="vendor/pdfjs/pdf.min.js"></script>
+<script src="js/pdf-parser.js"></script>
+<script src="js/add-book.js"></script>
+</body>
+</html>

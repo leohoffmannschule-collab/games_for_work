@@ -1,2 +1,5 @@
 node_modules/
 .DS_Store
+
+# Eigene Bücher für LoreVault bleiben lokal
+apps/lorevault/books/*.pdf

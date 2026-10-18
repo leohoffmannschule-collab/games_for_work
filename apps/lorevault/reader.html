@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <link rel="stylesheet" href="vendor/fonts/fonts.css" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>LoreVault – Lesen</title>
+  <link rel="stylesheet" href="css/style.css" />
+  <link rel="stylesheet" href="css/reader.css" />
+  
+  <link rel="stylesheet" href="vendor/bootstrap-icons/bootstrap-icons.min.css">
+</head>
+<body class="reader-body">
+
+<!-- READER TOPBAR -->
+<div class="reader-bar" id="readerBar">
+  <a href="#" id="backToBook" class="reader-back"><i class="bi bi-arrow-left"></i> <span id="bookTitleShort"></span></a>
+  <div class="reader-chapter-title" id="readerChapterTitle"></div>
+  <div class="reader-controls">
+    <button id="fontDecBtn" title="Schrift kleiner"><i class="bi bi-type-bold"></i><span style="font-size:.7em">−</span></button>
+    <button id="fontIncBtn" title="Schrift größer"><i class="bi bi-type-bold"></i><span style="font-size:.7em">+</span></button>
+    <button id="themeBtn" title="Theme wechseln"><i class="bi bi-circle-half"></i></button>
+    <button id="tocBtn" title="Inhaltsverzeichnis"><i class="bi bi-list-ul"></i></button>
+  </div>
+</div>
+
+<!-- PROGRESS BAR -->
+<div class="reading-progress-bar" id="readingProgress"></div>
+
+<!-- TOC SIDEBAR -->
+<aside class="toc-sidebar" id="tocSidebar">
+  <div class="toc-header">
+    <h3>Kapitel</h3>
+    <button id="closeToc"><i class="bi bi-x-lg"></i></button>
+  </div>
+  <ul class="toc-list" id="tocList"></ul>
+</aside>
+<div class="toc-overlay" id="tocOverlay"></div>
+
+<!-- READER CONTENT -->
+<main class="reader-main" id="readerMain">
+  <div class="reader-content" id="readerContent">
+    <div class="loading-state">
+      <div class="spinner"></div>
+      <p>Kapitel wird geladen…</p>
+    </div>
+  </div>
+</main>
+
+<!-- CHAPTER NAVIGATION -->
+<nav class="chapter-nav" id="chapterNav" style="display:none;">
+  <button class="chapter-nav-btn" id="prevChapterBtn"><i class="bi bi-chevron-left"></i> Vorheriges Kapitel</button>
+  <span class="chapter-nav-info" id="chapterNavInfo"></span>
+  <button class="chapter-nav-btn" id="nextChapterBtn">Nächstes Kapitel <i class="bi bi-chevron-right"></i></button>
+</nav>
+
+<script>
+// Prüfen ob pdf.min.js geladen werden kann – wenn nicht: Setup-Hinweis zeigen
+window._pdfLoadError = false;
+</script>
+<script src="vendor/pdfjs/pdf.min.js" onerror="window._pdfLoadError=true;"></script>
+<script>
+if (window._pdfLoadError) {
+  document.getElementById('readerContent').innerHTML = `
+    <div style="text-align:center;padding:4rem 2rem;">
+      <div style="font-size:3rem;margin-bottom:1.5rem;">⚙️</div>
+      <h2 style="font-family:var(--font-display);color:var(--text-primary);margin-bottom:1rem;">
+        Einrichtung erforderlich
+      </h2>
+      <p style="color:var(--text-secondary);max-width:480px;margin:0 auto 1.5rem;line-height:1.8;">
+        Die Bibliothek-Dateien wurden noch nicht heruntergeladen.<br/>
+        Bitte führe einmalig <code style="background:var(--bg-hover);padding:.15em .5em;border-radius:4px;color:var(--accent);font-family:var(--font-mono);">download-deps.bat</code> im LoreVault-Ordner aus.
+      </p>
+      <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:1.5rem;max-width:420px;margin:0 auto 2rem;text-align:left;">
+        <div style="font-size:.8rem;color:var(--text-muted);font-family:var(--font-mono);margin-bottom:.8rem;text-transform:uppercase;letter-spacing:.1em;">Fehlende Datei</div>
+        <code style="color:var(--danger);font-family:var(--font-mono);font-size:.95rem;">vendor/pdfjs/pdf.min.js</code>
+        <div style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border);font-size:.9rem;color:var(--text-muted);">
+          → Doppelklick auf <strong style="color:var(--accent);">download-deps.bat</strong><br/>
+          → Danach Server neu starten
+        </div>
+      </div>
+      <a href="setup.html" style="display:inline-flex;align-items:center;gap:.5rem;background:var(--accent);color:var(--bg-base);padding:.7rem 1.5rem;border-radius:8px;font-weight:600;text-decoration:none;margin-right:.8rem;">
+        ⬡ Setup-Anleitung öffnen
+      </a>
+      <a href="index.html" style="display:inline-flex;align-items:center;gap:.5rem;background:var(--bg-card);border:1px solid var(--border);color:var(--text-secondary);padding:.7rem 1.5rem;border-radius:8px;text-decoration:none;">
+        ← Bibliothek
+      </a>
+    </div>`;
+  document.getElementById('chapterNav').style.display = 'none';
+}
+</script>
+<script src="js/pdf-parser.js"></script>
+<script>
+if (!window._pdfLoadError) {
+  // reader.js nur laden wenn PDF.js verfügbar ist
+  var s = document.createElement('script');
+  s.src = 'js/reader.js';
+  document.body.appendChild(s);
+}
+</script>
+</body>
+</html>

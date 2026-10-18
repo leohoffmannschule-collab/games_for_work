@@ -86,6 +86,19 @@ export const store = {
     const b = store.stats(gameId).best;
     return mode == null ? b : b[mode];
   },
+
+  /**
+   * Liest einen Eintrag einer eingebundenen App unter apps/ (gleiche Herkunft,
+   * eigener Schluessel ohne Praefix). Nur lesend – die Daten gehoeren der App.
+   */
+  peek(key) {
+    if (!usable) return null;
+    try {
+      return JSON.parse(localStorage.getItem(key));
+    } catch {
+      return null;
+    }
+  },
 };
 
 /** 83 -> "1:23" */

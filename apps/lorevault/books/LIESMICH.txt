@@ -1,0 +1,6 @@
+Hier liegen die PDFs für LoreVault.
+
+Datei hierher kopieren, dann im Hub LoreVault öffnen, „Buch hinzufügen"
+wählen und den Dateinamen eintragen (etwa: mein-buch.pdf).
+
+PDFs in diesem Ordner werden nicht eingecheckt (siehe .gitignore).

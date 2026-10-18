@@ -1,0 +1,12 @@
+{
+  "klarwasser-hof": {
+    "repo": "https://github.com/leohoffmannschule-collab/the_price_of_clearwater.git",
+    "zweig": "claude/busy-lovelace-s50ri5",
+    "commit": "fd009d1c19dfc4b34c332e507de1c50d1752849a"
+  },
+  "lorevault": {
+    "repo": "https://github.com/leohoffmannschule-collab/LoreVault.git",
+    "zweig": "main",
+    "commit": "75071229fae411b80c2fe22b26be179e96e44661"
+  }
+}

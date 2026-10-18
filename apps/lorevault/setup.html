@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>LoreVault – Setup</title>
+  
+  <link rel="stylesheet" href="vendor/bootstrap-icons/bootstrap-icons.min.css">
+  <style>
+    :root {
+      --bg:      #0d0d0f;
+      --surface: #141418;
+      --card:    #1a1a20;
+      --hover:   #22222a;
+      --border:  #2a2a35;
+      --accent:  #c8a96e;
+      --accent-dim: #9a7d4a;
+      --accent-glow: rgba(200,169,110,0.15);
+      --text:    #e8e4dc;
+      --muted:   #9590a0;
+      --dim:     #5a5568;
+      --success: #5ab585;
+      --danger:  #e05a5a;
+      --warn:    #e0a85a;
+      --font-d:  'Playfair Display', Georgia, serif;
+      --font-b:  'Crimson Pro', Georgia, serif;
+      --font-m:  'JetBrains Mono', monospace;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font-b);
+      font-size: 1.05rem;
+      line-height: 1.7;
+      min-height: 100vh;
+    }
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: var(--bg); }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+    /* ── NAV ── */
+    nav {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: .9rem 2rem;
+      background: rgba(13,13,15,0.95);
+      border-bottom: 1px solid var(--border);
+      position: sticky; top: 0; z-index: 10;
+    }
+    .brand { display: flex; align-items: center; gap: .6rem; }
+    .brand-hex { font-size: 1.4rem; color: var(--accent); }
+    .brand-name { font-family: var(--font-d); font-size: 1.3rem; font-weight: 700; }
+
+    /* ── HERO ── */
+    .hero {
+      text-align: center;
+      padding: 5rem 2rem 3rem;
+      position: relative; overflow: hidden;
+    }
+    .hero::before {
+      content: '';
+      position: absolute; top: -80px; left: 50%; transform: translateX(-50%);
+      width: 600px; height: 400px;
+      background: radial-gradient(ellipse, rgba(200,169,110,0.1) 0%, transparent 70%);
+      pointer-events: none;
+    }
+    .hero-badge {
+      display: inline-flex; align-items: center; gap: .5rem;
+      background: rgba(224,90,90,0.15);
+      border: 1px solid rgba(224,90,90,0.3);
+      color: var(--danger);
+      border-radius: 20px;
+      padding: .35rem 1rem;
+      font-size: .85rem;
+      font-family: var(--font-m);
+      margin-bottom: 1.5rem;
+    }
+    .hero h1 {
+      font-family: var(--font-d);
+      font-size: clamp(2rem, 5vw, 3.2rem);
+      font-weight: 700;
+      margin-bottom: 1rem;
+      line-height: 1.2;
+    }
+    .hero h1 em { font-style: italic; color: var(--accent); }
+    .hero p { color: var(--muted); max-width: 560px; margin: 0 auto 2rem; }
+
+    /* ── CONTAINER ── */
+    .container { max-width: 860px; margin: 0 auto; padding: 0 2rem 5rem; }
+
+    /* ── CARDS ── */
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 2rem;
+      margin-bottom: 1.5rem;
+    }
+    .card-header {
+      display: flex; align-items: center; gap: .8rem;
+      margin-bottom: 1.2rem;
+    }
+    .card-icon {
+      width: 42px; height: 42px; border-radius: 10px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.2rem; flex-shrink: 0;
+    }
+    .icon-warn  { background: rgba(224,168,90,0.15); color: var(--warn);    border: 1px solid rgba(224,168,90,0.3); }
+    .icon-blue  { background: rgba(90,150,224,0.15); color: #6aadee;        border: 1px solid rgba(90,150,224,0.3); }
+    .icon-green { background: rgba(90,181,133,0.15); color: var(--success); border: 1px solid rgba(90,181,133,0.3); }
+    .card-title { font-family: var(--font-d); font-size: 1.25rem; font-weight: 700; }
+
+    /* ── STEPS ── */
+    .steps { display: flex; flex-direction: column; gap: 1rem; }
+    .step {
+      display: flex; gap: 1rem; align-items: flex-start;
+    }
+    .step-num {
+      width: 28px; height: 28px; border-radius: 50%;
+      background: var(--accent); color: var(--bg);
+      display: flex; align-items: center; justify-content: center;
+      font-size: .85rem; font-weight: 700; font-family: var(--font-m);
+      flex-shrink: 0; margin-top: .15rem;
+    }
+    .step-body { flex: 1; }
+    .step-body strong { color: var(--text); display: block; margin-bottom: .2rem; }
+    .step-body p, .step-body small { color: var(--muted); font-size: .95rem; }
+
+    /* ── CODE BLOCK ── */
+    .code-block {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: .8rem 1.1rem;
+      font-family: var(--font-m);
+      font-size: .9rem;
+      color: var(--accent);
+      margin: .5rem 0;
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 1rem;
+      cursor: pointer;
+      transition: border-color .2s, background .2s;
+      position: relative;
+    }
+    .code-block:hover { border-color: var(--accent-dim); background: var(--hover); }
+    .code-block .copy-hint {
+      font-size: .75rem; color: var(--dim);
+      white-space: nowrap; flex-shrink: 0;
+    }
+    .code-block.copied { border-color: var(--success); }
+    .code-block.copied .copy-hint { color: var(--success); }
+
+    /* ── OS TABS ── */
+    .os-tabs { display: flex; gap: .4rem; margin-bottom: 1rem; flex-wrap: wrap; }
+    .os-tab {
+      padding: .35rem .9rem;
+      border-radius: 20px;
+      border: 1px solid var(--border);
+      background: none;
+      color: var(--muted);
+      font-family: var(--font-b);
+      font-size: .9rem;
+      cursor: pointer;
+      transition: all .2s;
+      display: flex; align-items: center; gap: .4rem;
+    }
+    .os-tab.active {
+      background: var(--accent); border-color: var(--accent);
+      color: var(--bg); font-weight: 600;
+    }
+    .os-panel { display: none; }
+    .os-panel.active { display: block; }
+
+    /* ── FOLDER STRUCTURE ── */
+    .folder-tree {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1rem 1.2rem;
+      font-family: var(--font-m);
+      font-size: .88rem;
+      line-height: 2;
+    }
+    .folder-tree .dir  { color: #6aadee; }
+    .folder-tree .file { color: var(--muted); }
+    .folder-tree .hl   { color: var(--accent); font-weight: 600; }
+    .folder-tree .note { color: var(--dim); font-style: italic; margin-left: .5rem; }
+
+    /* ── OPEN LINK ── */
+    .open-btn {
+      display: inline-flex; align-items: center; gap: .6rem;
+      padding: .75rem 1.6rem;
+      background: var(--accent); color: var(--bg);
+      border-radius: 8px; font-family: var(--font-b);
+      font-size: 1rem; font-weight: 600;
+      text-decoration: none; transition: all .2s;
+      border: none; cursor: pointer;
+    }
+    .open-btn:hover { background: #d9bb80; box-shadow: 0 4px 20px rgba(200,169,110,0.35); }
+    .open-btn-wrap { margin-top: 1.5rem; display: flex; gap: 1rem; flex-wrap: wrap; align-items: center; }
+
+    /* ── DIVIDER ── */
+    hr { border: none; border-top: 1px solid var(--border); margin: 1.5rem 0; }
+
+    /* ── FOOTER ── */
+    footer {
+      text-align: center; padding: 1.5rem;
+      color: var(--dim); font-size: .82rem;
+      border-top: 1px solid var(--border);
+      font-family: var(--font-m);
+    }
+
+    @media (max-width: 600px) {
+      nav { padding: .7rem 1rem; }
+      .container { padding: 0 1rem 3rem; }
+      .hero { padding: 3rem 1rem 2rem; }
+      .card { padding: 1.3rem; }
+    }
+  </style>
+</head>
+<body>
+
+<nav>
+  <div class="brand">
+    <span class="brand-hex">⬡</span>
+    <span class="brand-name">LoreVault</span>
+  </div>
+  <span style="font-family:var(--font-m);font-size:.8rem;color:var(--dim);">Setup-Anleitung</span>
+</nav>
+
+<div class="hero">
+  <div class="hero-badge"><i class="bi bi-exclamation-triangle-fill"></i> Chrome-Sicherheitseinschränkung</div>
+  <h1>Einen kurzen Schritt<br/><em>vor dem Lesen</em></h1>
+  <p>Chrome blockiert den Zugriff auf lokale Dateien. Ein kleiner lokaler Server (1 Befehl) löst das dauerhaft.</p>
+</div>
+
+<div class="container">
+
+  <!-- WARUM -->
+  <div class="card">
+    <div class="card-header">
+      <div class="card-icon icon-warn"><i class="bi bi-shield-exclamation"></i></div>
+      <div class="card-title">Warum funktioniert es nicht direkt?</div>
+    </div>
+    <p style="color:var(--muted);">
+      Wenn du <code style="background:var(--hover);padding:.1em .4em;border-radius:4px;color:var(--accent);font-family:var(--font-m);font-size:.9em;">index.html</code> direkt im Browser öffnest (über <code style="background:var(--hover);padding:.1em .4em;border-radius:4px;color:var(--accent);font-family:var(--font-m);font-size:.9em;">file://</code>), blockiert Chrome aus Sicherheitsgründen den Zugriff auf andere lokale Dateien – also auch auf deine PDFs im <code style="background:var(--hover);padding:.1em .4em;border-radius:4px;color:var(--accent);font-family:var(--font-m);font-size:.9em;">books/</code> Ordner.
+      <br/><br/>
+      Die Lösung: Ein minimaler lokaler Webserver, der die Dateien über <code style="background:var(--hover);padding:.1em .4em;border-radius:4px;color:var(--accent);font-family:var(--font-m);font-size:.9em;">http://</code> ausliefert. Python ist auf fast jedem Computer vorinstalliert und dafür perfekt geeignet.
+    </p>
+  </div>
+
+  <!-- ORDNERSTRUKTUR -->
+  <div class="card">
+    <div class="card-header">
+      <div class="card-icon icon-blue"><i class="bi bi-folder2-open"></i></div>
+      <div class="card-title">Ordnerstruktur</div>
+    </div>
+    <p style="color:var(--muted);margin-bottom:1rem;">So sollte dein Ordner aussehen:</p>
+    <div class="folder-tree">
+      <span class="dir">📁 lorevault/</span><br/>
+      <span class="file">&nbsp;&nbsp;├── </span><span class="hl">index.html</span><br/>
+      <span class="file">&nbsp;&nbsp;├── add-book.html</span><br/>
+      <span class="file">&nbsp;&nbsp;├── book-detail.html</span><br/>
+      <span class="file">&nbsp;&nbsp;├── reader.html</span><br/>
+      <span class="file">&nbsp;&nbsp;├── setup.html</span><span class="note">← diese Seite</span><br/>
+      <span class="hl">&nbsp;&nbsp;├── start-server.bat</span><span class="note">← Windows</span><br/>
+      <span class="hl">&nbsp;&nbsp;├── start-server.sh</span><span class="note">← Mac/Linux</span><br/>
+      <span class="dir">&nbsp;&nbsp;├── 📁 css/</span><br/>
+      <span class="dir">&nbsp;&nbsp;├── 📁 js/</span><br/>
+      <span class="dir">&nbsp;&nbsp;└── 📁 books/</span><br/>
+      <span class="file">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;├── </span><span class="hl">meinbuch.pdf</span><span class="note">← deine PDFs hierher</span><br/>
+      <span class="file">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;└── nocheins.pdf</span>
+    </div>
+  </div>
+
+  <!-- SERVER STARTEN -->
+  <div class="card">
+    <div class="card-header">
+      <div class="card-icon icon-green"><i class="bi bi-terminal"></i></div>
+      <div class="card-title">Server starten</div>
+    </div>
+
+    <div class="os-tabs">
+      <button class="os-tab active" data-os="win"><i class="bi bi-windows"></i> Windows</button>
+      <button class="os-tab" data-os="mac"><i class="bi bi-apple"></i> macOS</button>
+      <button class="os-tab" data-os="lin"><i class="bi bi-ubuntu"></i> Linux</button>
+      <button class="os-tab" data-os="man"><i class="bi bi-terminal-fill"></i> Manuell</button>
+    </div>
+
+    <!-- Windows -->
+    <div class="os-panel active" id="os-win">
+      <div class="steps">
+        <div class="step">
+          <div class="step-num">1</div>
+          <div class="step-body">
+            <strong>Python installiert?</strong>
+            <p>Falls nicht: <a href="https://www.python.org/downloads/" target="_blank" style="color:var(--accent);">python.org/downloads</a> – beim Installieren „Add Python to PATH" aktivieren.</p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">2</div>
+          <div class="step-body">
+            <strong>start-server.bat doppelklicken</strong>
+            <p>Die Datei liegt im LoreVault-Ordner. Doppelklick startet Server und öffnet den Browser automatisch.</p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">3</div>
+          <div class="step-body">
+            <strong>Oder: manuell im Terminal</strong>
+            <p>Öffne cmd/PowerShell im LoreVault-Ordner (<kbd style="background:var(--hover);padding:.1em .4em;border-radius:3px;font-family:var(--font-m);font-size:.85em;">Shift+Rechtsklick → Terminal öffnen</kbd>):</p>
+            <div class="code-block" onclick="copyCode(this)">
+              <span>python -m http.server 8000</span>
+              <span class="copy-hint"><i class="bi bi-clipboard"></i> kopieren</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- macOS -->
+    <div class="os-panel" id="os-mac">
+      <div class="steps">
+        <div class="step">
+          <div class="step-num">1</div>
+          <div class="step-body">
+            <strong>start-server.sh ausführbar machen (einmalig)</strong>
+            <div class="code-block" onclick="copyCode(this)">
+              <span>chmod +x start-server.sh</span>
+              <span class="copy-hint"><i class="bi bi-clipboard"></i> kopieren</span>
+            </div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">2</div>
+          <div class="step-body">
+            <strong>Script starten</strong>
+            <p>Terminal im LoreVault-Ordner öffnen (<kbd style="background:var(--hover);padding:.1em .4em;border-radius:3px;font-family:var(--font-m);font-size:.85em;">cd ~/pfad/zu/lorevault</kbd>):</p>
+            <div class="code-block" onclick="copyCode(this)">
+              <span>./start-server.sh</span>
+              <span class="copy-hint"><i class="bi bi-clipboard"></i> kopieren</span>
+            </div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">3</div>
+          <div class="step-body">
+            <strong>Oder direkt:</strong>
+            <div class="code-block" onclick="copyCode(this)">
+              <span>python3 -m http.server 8000</span>
+              <span class="copy-hint"><i class="bi bi-clipboard"></i> kopieren</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Linux -->
+    <div class="os-panel" id="os-lin">
+      <div class="steps">
+        <div class="step">
+          <div class="step-num">1</div>
+          <div class="step-body">
+            <strong>Python 3 installiert?</strong>
+            <div class="code-block" onclick="copyCode(this)">
+              <span>sudo apt install python3</span>
+              <span class="copy-hint"><i class="bi bi-clipboard"></i> kopieren</span>
+            </div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">2</div>
+          <div class="step-body">
+            <strong>Script starten:</strong>
+            <div class="code-block" onclick="copyCode(this)">
+              <span>bash start-server.sh</span>
+              <span class="copy-hint"><i class="bi bi-clipboard"></i> kopieren</span>
+            </div>
+            <p style="margin-top:.5rem;">Oder direkt:</p>
+            <div class="code-block" onclick="copyCode(this)">
+              <span>python3 -m http.server 8000</span>
+              <span class="copy-hint"><i class="bi bi-clipboard"></i> kopieren</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Manuell -->
+    <div class="os-panel" id="os-man">
+      <p style="color:var(--muted);margin-bottom:1rem;">Terminal/Kommandozeile im LoreVault-Ordner öffnen und einen dieser Befehle eingeben:</p>
+      <div class="steps">
+        <div class="step">
+          <div class="step-num">Py</div>
+          <div class="step-body">
+            <strong>Python 3 (empfohlen)</strong>
+            <div class="code-block" onclick="copyCode(this)">
+              <span>python3 -m http.server 8000</span>
+              <span class="copy-hint"><i class="bi bi-clipboard"></i> kopieren</span>
+            </div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">Py</div>
+          <div class="step-body">
+            <strong>Python (Windows)</strong>
+            <div class="code-block" onclick="copyCode(this)">
+              <span>python -m http.server 8000</span>
+              <span class="copy-hint"><i class="bi bi-clipboard"></i> kopieren</span>
+            </div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">JS</div>
+          <div class="step-body">
+            <strong>Node.js (falls installiert)</strong>
+            <div class="code-block" onclick="copyCode(this)">
+              <span>npx serve .</span>
+              <span class="copy-hint"><i class="bi bi-clipboard"></i> kopieren</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <hr/>
+
+    <div class="open-btn-wrap">
+      <a href="http://localhost:8000" class="open-btn" target="_blank">
+        <i class="bi bi-box-arrow-up-right"></i> LoreVault öffnen (localhost:8000)
+      </a>
+      <span style="color:var(--dim);font-size:.9rem;">← Erst nach dem Serverstart klicken</span>
+    </div>
+  </div>
+
+  <!-- TIPP -->
+  <div class="card" style="border-color:rgba(200,169,110,0.2);background:rgba(200,169,110,0.04);">
+    <div class="card-header">
+      <div class="card-icon" style="background:var(--accent-glow);color:var(--accent);border:1px solid rgba(200,169,110,0.3);">
+        <i class="bi bi-lightbulb"></i>
+      </div>
+      <div class="card-title">Tipp: Lesezeichen setzen</div>
+    </div>
+    <p style="color:var(--muted);">
+      Setze <code style="background:var(--hover);padding:.1em .4em;border-radius:4px;color:var(--accent);font-family:var(--font-m);font-size:.9em;">http://localhost:8000</code> als Lesezeichen in Chrome.
+      In Zukunft reicht es, den Server zu starten und dann das Lesezeichen zu öffnen –
+      du musst nie wieder manuell navigieren.
+    </p>
+  </div>
+
+</div>
+
+<footer>LoreVault &copy; 2025 – Lokale Bibliothek</footer>
+
+<script>
+  // OS-Tabs
+  document.querySelectorAll('.os-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      document.querySelectorAll('.os-tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.os-panel').forEach(p => p.classList.remove('active'));
+      tab.classList.add('active');
+      document.getElementById('os-' + tab.dataset.os).classList.add('active');
+    });
+  });
+
+  // Auto-Detect OS
+  const ua = navigator.userAgent.toLowerCase();
+  let os = 'win';
+  if (ua.includes('mac')) os = 'mac';
+  else if (ua.includes('linux')) os = 'lin';
+  document.querySelector(`[data-os="${os}"]`)?.click();
+
+  // Code kopieren
+  function copyCode(el) {
+    const code = el.querySelector('span:first-child').textContent.trim();
+    navigator.clipboard.writeText(code).then(() => {
+      el.classList.add('copied');
+      el.querySelector('.copy-hint').innerHTML = '<i class="bi bi-check-lg"></i> kopiert!';
+      setTimeout(() => {
+        el.classList.remove('copied');
+        el.querySelector('.copy-hint').innerHTML = '<i class="bi bi-clipboard"></i> kopieren';
+      }, 2000);
+    });
+  }
+  window.copyCode = copyCode;
+</script>
+</body>
+</html>

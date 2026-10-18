@@ -299,6 +299,72 @@ button {
   margin: 0 1px;
 }
 
+.hub-section + .hub-section {
+  margin-top: 34px;
+}
+.section-head {
+  display: flex;
+  align-items: baseline;
+  gap: 4px 12px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+.section-head h2 {
+  font-size: 19px;
+}
+.section-head span {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+/* ---------- App-Ansicht (apps/ im Rahmen) ---------- */
+
+body.app-mode {
+  overflow: hidden;
+}
+.app-mode .shell {
+  max-width: none;
+  height: 100vh;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  padding: 12px;
+}
+.app-mode .topbar {
+  display: none;
+}
+.app-mode #view {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.app-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.app-bar h2 {
+  flex: 1;
+  min-width: 0;
+  font-size: 17px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-frame {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: #101a20;
+  box-shadow: var(--shadow);
+}
+
 /* ---------- Spiel-Ansicht ---------- */
 
 .game-head {
@@ -1013,5 +1079,14 @@ kbd {
     width: 27px;
     height: 27px;
     font-size: 14px;
+  }
+  .app-mode .shell {
+    padding: 8px;
+  }
+  .app-mode #view {
+    gap: 8px;
+  }
+  .app-tab span {
+    display: none;
   }
 }

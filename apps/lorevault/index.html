@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <link rel="stylesheet" href="vendor/fonts/fonts.css" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>LoreVault – Deine Bibliothek</title>
+  <link rel="stylesheet" href="css/style.css" />
+  
+  <!-- PDF.js -->
+  <script src="vendor/pdfjs/pdf.min.js"></script>
+  <!-- Bootstrap Icons -->
+  <link rel="stylesheet" href="vendor/bootstrap-icons/bootstrap-icons.min.css">
+</head>
+<body>
+
+<!-- FILE:// WARNING BANNER (wird per JS nur bei file:// eingeblendet) -->
+<div id="fileProtocolBanner" style="display:none;
+  background:linear-gradient(90deg,rgba(224,90,90,0.12),rgba(224,90,90,0.06));
+  border-bottom:1px solid rgba(224,90,90,0.3);
+  padding:.8rem 2rem;
+  display:none; align-items:center; gap:1rem; flex-wrap:wrap;">
+  <span style="color:#e05a5a;font-size:1.1rem;">⚠️</span>
+  <span style="flex:1;font-size:.95rem;color:#e8e4dc;">
+    <strong style="color:#e05a5a;">PDFs nicht ladbar:</strong>
+    Du öffnest LoreVault direkt als Datei (<code style="background:rgba(0,0,0,.3);padding:.1em .4em;border-radius:3px;font-family:monospace;font-size:.85em;">file://</code>).
+    Bitte starte zuerst den lokalen Server.
+  </span>
+  <a href="setup.html" style="
+    background:#e05a5a;color:#fff;padding:.4rem 1rem;
+    border-radius:6px;font-size:.9rem;font-weight:600;
+    text-decoration:none;white-space:nowrap;flex-shrink:0;">
+    Anleitung öffnen →
+  </a>
+</div>
+
+<!-- NAVBAR -->
+<nav class="navbar">
+  <div class="nav-brand">
+    <span class="nav-logo">⬡</span>
+    <span class="nav-title">LoreVault</span>
+  </div>
+  <div class="nav-links">
+    <a href="index.html" class="nav-link active"><i class="bi bi-house-door"></i> Bibliothek</a>
+    <a href="add-book.html" class="nav-link"><i class="bi bi-plus-circle"></i> Buch hinzufügen</a>
+  </div>
+</nav>
+
+<!-- HERO -->
+<header class="hero">
+  <div class="hero-content">
+    <h1 class="hero-title">Deine <em>persönliche</em><br/>Bibliothek</h1>
+    <p class="hero-sub">Bücher aus dem <code>books/</code> Ordner einpflegen &amp; kapitelweise lesen</p>
+  </div>
+  <div class="hero-decoration"></div>
+</header>
+
+<!-- MAIN -->
+<main class="container">
+
+  <!-- FILTER / SEARCH -->
+  <div class="library-toolbar">
+    <div class="search-wrap">
+      <i class="bi bi-search"></i>
+      <input type="text" id="searchInput" placeholder="Titel, Autor oder Genre suchen…" />
+    </div>
+    <div class="filter-tags" id="genreFilter">
+      <button class="tag active" data-genre="all">Alle</button>
+    </div>
+  </div>
+
+  <!-- BOOK GRID -->
+  <section class="book-grid" id="bookGrid">
+    <div class="empty-state" id="emptyState">
+      <div class="empty-icon">📚</div>
+      <h3>Noch keine Bücher</h3>
+      <p>Füge dein erstes Buch über <a href="add-book.html">„Buch hinzufügen"</a> ein.</p>
+    </div>
+  </section>
+</main>
+
+<footer class="site-footer">
+  <span>LoreVault &copy; 2025 &mdash; Lokale Bibliothek</span>
+</footer>
+
+<script src="js/library.js"></script>
+<script>
+  if (location.protocol === 'file:') {
+    const b = document.getElementById('fileProtocolBanner');
+    b.style.display = 'flex';
+  }
+</script>
+</body>
+</html>
