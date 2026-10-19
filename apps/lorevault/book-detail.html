@@ -2,18 +2,16 @@
 <html lang="de">
 <head>
   <meta charset="UTF-8" />
-  <link rel="stylesheet" href="vendor/fonts/fonts.css" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>LoreVault – Buchdetails</title>
-  <link rel="stylesheet" href="css/style.css" />
-  
-  <link rel="stylesheet" href="vendor/bootstrap-icons/bootstrap-icons.min.css">
+  <link rel="stylesheet" href="CSS/book-detail.css" />
+  <script src="JS/book-detail.js" defer></script>
 </head>
 <body>
 
 <nav class="navbar">
   <div class="nav-brand">
-    <a href="index.html" style="text-decoration:none;display:flex;align-items:center;gap:.5rem;color:inherit">
+    <a href="index.html" class="nav-brand-link">
       <span class="nav-logo">⬡</span>
       <span class="nav-title">LoreVault</span>
     </a>
@@ -23,7 +21,7 @@
   </div>
 </nav>
 
-<main class="container" style="padding-top:2rem;" id="bookDetailMain">
+<main class="container with-top-space" id="bookDetailMain">
   <div class="loading-state">
     <div class="spinner"></div>
     <p>Buchdetails laden…</p>
@@ -34,6 +32,5 @@
   <span>LoreVault &copy; 2025 &mdash; Lokale Bibliothek</span>
 </footer>
 
-<script src="js/book-detail.js"></script>
 </body>
 </html>

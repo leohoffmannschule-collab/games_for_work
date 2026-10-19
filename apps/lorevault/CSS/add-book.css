@@ -1,0 +1,25 @@
+/* ============================================================
+   LoreVault – add-book.css
+   Einziges Stylesheet von add-book.html (Buch hinzufügen)
+   ============================================================ */
+
+@import url('../vendor/fonts/fonts.css');
+@import url('../vendor/bootstrap-icons/bootstrap-icons.min.css');
+@import url('basis.css');
+
+.cover-none-hint { opacity: .6; font-size: .9rem; }
+
+/* ── Kapitel-Erkennung: Modus-Auswahl ── */
+.mode-options { display: flex; flex-direction: column; gap: .6rem; margin-bottom: .8rem; }
+.mode-options strong { color: var(--text-primary); }
+.mode-desc { display: block; font-size: .85rem; opacity: .7; margin-top: .1rem; }
+
+.keyword-field { margin-top: .4rem; }
+/* Bei „Nur Schlüsselwörter" ist das Feld Pflicht (setzt add-book.js) */
+#headingKeywords.is-required { border-color: var(--accent-dim); }
+
+/* Kleiner Spinner in Knöpfen */
+.spinner.spinner-inline {
+  width: 18px; height: 18px; border-width: 2px;
+  display: inline-block; vertical-align: middle; margin-right: 6px;
+}

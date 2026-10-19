@@ -2,20 +2,17 @@
 <html lang="de">
 <head>
   <meta charset="UTF-8" />
-  <link rel="stylesheet" href="vendor/fonts/fonts.css" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>LoreVault – Buch hinzufügen</title>
-  <link rel="stylesheet" href="css/style.css" />
-  
-  <script src="vendor/pdfjs/pdf.min.js"></script>
-  <link rel="stylesheet" href="vendor/bootstrap-icons/bootstrap-icons.min.css">
+  <link rel="stylesheet" href="CSS/add-book.css" />
+  <script src="JS/add-book.js" defer></script>
 </head>
 <body>
 
 <!-- NAVBAR -->
 <nav class="navbar">
   <div class="nav-brand">
-    <a href="index.html" style="text-decoration:none;display:flex;align-items:center;gap:.5rem;color:inherit">
+    <a href="index.html" class="nav-brand-link">
       <span class="nav-logo">⬡</span>
       <span class="nav-title">LoreVault</span>
     </a>
@@ -26,7 +23,7 @@
   </div>
 </nav>
 
-<main class="container" style="padding-top:2rem;">
+<main class="container with-top-space">
   <div class="form-card">
     <h2 class="form-title"><i class="bi bi-book"></i> Neues Buch einpflegen</h2>
     <p class="form-hint">Lege die PDF-Datei in den <code>books/</code> Ordner neben der <code>index.html</code> und trage den Dateinamen unten ein.</p>
@@ -84,11 +81,11 @@
             <input type="text" id="coverUrl" placeholder="https://..." />
           </div>
           <div class="cover-tab" id="coverTab-none">
-            <p style="opacity:.6;font-size:.9rem;">Ein generisches Cover wird angezeigt.</p>
+            <p class="cover-none-hint">Ein generisches Cover wird angezeigt.</p>
           </div>
         </div>
         <div class="cover-preview-wrap">
-          <img id="coverPreview" src="" alt="Cover-Vorschau" style="display:none;" />
+          <img id="coverPreview" src="" alt="Cover-Vorschau" hidden />
         </div>
       </div>
 
@@ -98,36 +95,36 @@
         <div class="chapter-settings">
 
           <!-- Modus-Auswahl -->
-          <div style="display:flex;flex-direction:column;gap:.6rem;margin-bottom:.8rem;">
+          <div class="mode-options">
 
             <label class="toggle-label">
               <input type="radio" name="chapterMode" id="modeAuto" value="auto" checked />
               <span>
-                <strong style="color:var(--text-primary);">Automatisch</strong>
-                <span style="display:block;font-size:.85rem;opacity:.7;margin-top:.1rem;">Erkennt Überschriften anhand von Schriftgröße, Fettschrift und Standard-Schlüsselwörtern (Kapitel, Chapter, Teil …)</span>
+                <strong>Automatisch</strong>
+                <span class="mode-desc">Erkennt Überschriften anhand von Schriftgröße, Fettschrift und Standard-Schlüsselwörtern (Kapitel, Chapter, Teil …)</span>
               </span>
             </label>
 
             <label class="toggle-label">
               <input type="radio" name="chapterMode" id="modeCustom" value="custom" />
               <span>
-                <strong style="color:var(--text-primary);">Eigene Schlüsselwörter + automatisch</strong>
-                <span style="display:block;font-size:.85rem;opacity:.7;margin-top:.1rem;">Wie automatisch, aber mit deinen Schlüsselwörtern statt der Standard-Liste</span>
+                <strong>Eigene Schlüsselwörter + automatisch</strong>
+                <span class="mode-desc">Wie automatisch, aber mit deinen Schlüsselwörtern statt der Standard-Liste</span>
               </span>
             </label>
 
             <label class="toggle-label">
               <input type="radio" name="chapterMode" id="modeKeywordOnly" value="keyword-only" />
               <span>
-                <strong style="color:var(--text-primary);">Nur Schlüsselwörter</strong>
-                <span style="display:block;font-size:.85rem;opacity:.7;margin-top:.1rem;">Erkennt <em>ausschließlich</em> Zeilen die mit deinen Schlüsselwörtern beginnen – ignoriert Schriftgröße und Formatierung</span>
+                <strong>Nur Schlüsselwörter</strong>
+                <span class="mode-desc">Erkennt <em>ausschließlich</em> Zeilen die mit deinen Schlüsselwörtern beginnen – ignoriert Schriftgröße und Formatierung</span>
               </span>
             </label>
 
           </div>
 
           <!-- Schlüsselwort-Eingabe (eingeblendet bei custom + keyword-only) -->
-          <div id="customHeadingsWrap" style="display:none;margin-top:.4rem;">
+          <div id="customHeadingsWrap" class="keyword-field" hidden>
             <input type="text" id="headingKeywords" placeholder="Kapitel, Chapter, Teil, Part, Abschnitt" />
             <small>Komma-getrennt. Groß-/Kleinschreibung egal.</small>
           </div>
@@ -160,9 +157,5 @@
   <span>LoreVault &copy; 2025 &mdash; Lokale Bibliothek</span>
 </footer>
 
-
-<script src="vendor/pdfjs/pdf.min.js"></script>
-<script src="js/pdf-parser.js"></script>
-<script src="js/add-book.js"></script>
 </body>
 </html>

@@ -158,7 +158,7 @@ export function createGame(ctx) {
     const cells = cellEls[rowIndex];
     for (let c = 0; c < LEN; c++) {
       const cell = cells[c];
-      cell.style.animationDelay = c * FLIP_STEP + 'ms';
+      cell.style.setProperty('--verzoegerung', c * FLIP_STEP + 'ms');
       cell.classList.add('flip');
       setTimeout(
         () => {
@@ -247,7 +247,7 @@ export function createGame(ctx) {
       for (const cell of cells) {
         cell.className = 'wort-cell';
         cell.textContent = '';
-        cell.style.animationDelay = '';
+        cell.style.removeProperty('--verzoegerung');
       }
     }
     for (const btn of keysEl.querySelectorAll('button'))

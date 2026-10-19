@@ -1,0 +1,31 @@
+/* ============================================================
+   LoreVault – index.css
+   Einziges Stylesheet von index.html (Bibliothek)
+   ============================================================ */
+
+@import url('../vendor/fonts/fonts.css');
+@import url('../vendor/bootstrap-icons/bootstrap-icons.min.css');
+@import url('basis.css');
+
+/* Karten erscheinen nacheinander; --i setzt index.js je Karte */
+.book-card { animation-delay: calc(var(--i, 0) * .05s); }
+
+/* ── Hinweis bei file:// (index.js blendet ihn ein) ── */
+.file-banner {
+  display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;
+  padding: .8rem 2rem;
+  background: linear-gradient(90deg, rgba(224,90,90,0.12), rgba(224,90,90,0.06));
+  border-bottom: 1px solid rgba(224,90,90,0.3);
+}
+.file-banner-icon { color: #e05a5a; font-size: 1.1rem; }
+.file-banner-text { flex: 1; font-size: .95rem; color: #e8e4dc; }
+.file-banner-text strong { color: #e05a5a; }
+.file-banner-text code {
+  background: rgba(0,0,0,.3); padding: .1em .4em; border-radius: 3px;
+  font-family: monospace; font-size: .85em;
+}
+.file-banner-btn {
+  background: #e05a5a; color: #fff; padding: .4rem 1rem;
+  border-radius: 6px; font-size: .9rem; font-weight: 600;
+  text-decoration: none; white-space: nowrap; flex-shrink: 0;
+}

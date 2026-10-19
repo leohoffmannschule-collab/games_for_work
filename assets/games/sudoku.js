@@ -163,7 +163,7 @@ export function createGame(ctx) {
     </div>
     <div class="sudoku-area">
       <div class="sudoku" id="grid"></div>
-      <div style="display:grid;gap:10px;width:min(408px,100%)">
+      <div class="sudoku-side">
         <div class="sud-pad" id="pad">
           ${[1, 2, 3, 4, 5, 6, 7, 8, 9].map((d) => `<button type="button" data-digit="${d}">${d}</button>`).join('')}
           <button type="button" data-digit="0" title="Feld leeren">⌫</button>

@@ -394,7 +394,7 @@ export function createGame(ctx) {
 
   function zeigeFortschritt() {
     const p = lauf ? prozent(lauf.x) : 0;
-    balken.style.width = p + '%';
+    balken.style.setProperty('--fortschritt', p + '%');
     out.prozent.textContent = p + ' %';
   }
 

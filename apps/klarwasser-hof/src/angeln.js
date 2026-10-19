@@ -1,11 +1,18 @@
 // Angeln: Auswerfen mit Kraftbalken, Warten, Anbiss, dann der Drill —
 // den grünen Balken über dem zappelnden Fisch halten, bis die Leiste voll ist.
+// Welche Fische wo beißen, steht im Register (daten.js: fisch); Köder sind Items mit `koeder`.
 
-import { T } from './daten.js';
-import { boden } from './karten.js';
+import { T, ITEMS } from './daten.js';
+import { istWasser, hatWasser, wasserArt } from './karten.js';
+import { mod } from './system.js';
 import * as L from './logik.js';
 
 const klemme = (v, a, b) => Math.max(a, Math.min(b, v));
+
+/** Erster Köder im Rucksack (Item mit `koeder: { biss }`). */
+function koederImRucksack(s) {
+  return s.spieler.inv.find((x) => x && ITEMS[x.id]?.koeder);
+}
 
 export function angelnStart(S) {
   S.angeln = { phase: 'laden', t: 0, kraft: 0 };
@@ -23,8 +30,10 @@ export function angelnUpdate(S, dt, E, fx) {
       if (a.t >= 0.45) {
         a.phase = 'warten';
         a.t = 0;
-        a.koeder = L.anzahl(S.s, 'koeder') > 0;
-        a.biss = (1.6 + Math.random() * 5) * (a.koeder ? 0.5 : 1);
+        const koeder = koederImRucksack(S.s);
+        a.koeder = koeder?.id || null;
+        const faktor = koeder ? ITEMS[koeder.id].koeder.biss ?? 0.5 : 1;
+        a.biss = mod('bissZeit', (1.6 + Math.random() * 5) * faktor, { s: S.s, koeder: a.koeder, wasser: a.wasser });
         fx.ton('platsch');
         fx.ringe(a.bx, a.by);
       }
@@ -36,7 +45,7 @@ export function angelnUpdate(S, dt, E, fx) {
         a.t = 0;
         fx.ton('biss');
         fx.ringe(a.bx, a.by);
-        if (a.koeder) L.entfernen(S.s, 'koeder', 1);
+        if (a.koeder) L.entfernen(S.s, a.koeder, 1);
       }
       break;
     case 'biss':
@@ -62,11 +71,11 @@ function auswerfen(S, fx) {
   const [dx, dy] = L.RICHTUNG[S.sp.blick];
   const weite = 1 + Math.round(a.kraft * 4);
   let ziel = null;
-  for (let d = weite; d >= 1 && !ziel; d--) if (boden(def, fx0 + dx * d, fy0 + dy * d) === '~') ziel = { x: fx0 + dx * d, y: fy0 + dy * d };
+  for (let d = weite; d >= 1 && !ziel; d--) if (istWasser(def, fx0 + dx * d, fy0 + dy * d)) ziel = { x: fx0 + dx * d, y: fy0 + dy * d };
   if (!ziel) {
-    for (let d = weite + 1; d <= 5 && !ziel; d++) if (boden(def, fx0 + dx * d, fy0 + dy * d) === '~') ziel = { x: fx0 + dx * d, y: fy0 + dy * d };
+    for (let d = weite + 1; d <= 5 && !ziel; d++) if (istWasser(def, fx0 + dx * d, fy0 + dy * d)) ziel = { x: fx0 + dx * d, y: fy0 + dy * d };
   }
-  if (!ziel || !def.wasser) {
+  if (!ziel || !hatWasser(def)) {
     fx.meldung('Wirf die Angel ins Wasser. Stell dich ans Ufer und schau aufs Wasser.');
     S.angeln = null;
     return;
@@ -75,7 +84,7 @@ function auswerfen(S, fx) {
   a.t = 0;
   a.bx = ziel.x * T + 8;
   a.by = ziel.y * T + 9;
-  a.wasser = def.wasser;
+  a.wasser = wasserArt(def, ziel.x, ziel.y);
   fx.ton('wurf');
 }
 
@@ -88,8 +97,8 @@ function haken(S, fx) {
   a.phase = 'drill';
   a.t = 0;
   a.drill = {
-    fisch: f.id, d: f.fisch.d, v: f.fisch.v,
-    zone: Math.min(0.42, 0.26 + lvl * 0.015),
+    fisch: f.id, d: f.fisch.schwierigkeit, v: f.fisch.verhalten,
+    zone: mod('fangBalken', Math.min(0.42, 0.26 + lvl * 0.015), { s: S.s, fisch: f.id }),
     p: 0, pv: 0, fp: 0.25, fz: 0.5, fort: 0.3, perfekt: true, wechsel: 0.4,
   };
   fx.ton('haken');

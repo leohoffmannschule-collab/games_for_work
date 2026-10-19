@@ -1,0 +1,4 @@
+// Bereich „npcs2" – weitere Dorfbewohner. Daten und Logik ohne DOM.
+// Noch leer: Hier entstehen Inhalte über die Register aus daten.js, karten.js, system.js und spiel.js.
+
+export {};

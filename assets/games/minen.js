@@ -93,7 +93,7 @@ export function createGame(ctx) {
     seconds = 0;
     stopTimer();
 
-    gridEl.style.gridTemplateColumns = `repeat(${cols}, auto)`;
+    gridEl.style.setProperty('--spalten', cols);
     gridEl.innerHTML = '';
     cells = [];
     const frag = document.createDocumentFragment();

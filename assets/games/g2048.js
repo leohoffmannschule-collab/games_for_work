@@ -195,7 +195,7 @@ export function createGame(ctx) {
     // Erst alle Kacheln (auch die sterbenden) an ihr Ziel gleiten lassen …
     for (const row of grid) for (const t of row) if (t) place(t);
     for (const t of dying) {
-      t.el.style.zIndex = '0';
+      t.el.classList.add('dying');
       place(t);
     }
 

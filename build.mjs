@@ -24,7 +24,7 @@ if (!title || !body) {
 
 const page = [
   `<title>${title[1]}</title>`,
-  '<link rel="stylesheet" href="assets/style.css">',
+  '<link rel="stylesheet" href="assets/index.css">',
   body[1].trim(),
   '',
 ].join('\n');

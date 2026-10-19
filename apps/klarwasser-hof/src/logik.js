@@ -1,35 +1,42 @@
 // Spiellogik ohne Bildschirm: Spielstand, Rucksack, Feldarbeit, Tageswechsel,
-// Freundschaften, Aufträge, Mühle, Läden, Basteln, Speichern.
+// Freundschaften, Läden, Basteln, Wege, Speichern. Nur Mechanik – die Inhalte (welche
+// Objekte, Pflanzen, Leute, Läden es gibt) kommen aus den Registern in daten.js.
 //
 // Ein „Ort" ist { def, welt }: die feste Kartenbeschreibung und ihr veränderlicher Teil
-// (Objekte, Beete, liegengebliebene Funde). Für Minenebenen kommt beides vom Generator.
+// (Objekte, Beete, liegengebliebene Funde). Für flüchtige Karten (Minenebenen) kommt beides
+// vom Kartenanbieter.
 
 import {
   ITEMS, PFLANZEN, SAAT_ZU_PFLANZE, JZ, JZ_NAME, TAGE_PRO_JZ, TAG_BEGINN, MAX_ENERGIE, MAX_HP,
   STAPEL_MAX, XP_STUFEN, QUALITAET, KANNE_INHALT, WERKZEUG_STUFEN, AUFRUESTBAR, LAEDEN, NPCS,
-  PUNKTE_PRO_HERZ, MAX_HERZEN, GESCHENK_PUNKTE, BUENDEL, BRIEFE, FISCHE, MUELL, HUEHNER_NAMEN,
-  WOCHENTAGE,
+  PUNKTE_PRO_HERZ, MAX_HERZEN, GESCHENK_PUNKTE, BRIEFE, FISCHE, MUELL, WOCHENTAGE, FAEHIGKEITEN,
+  OBJEKT_TYPEN, BEDINGUNGEN, WERKZEUG_ARTEN, SPEZIAL_WARE,
 } from './daten.js';
-import { KARTEN, boden, BLOCK_BODEN } from './karten.js';
-import { zufall, ganz, waehle } from './zufall.js';
-import { steinErtrag, SCHATZ } from './mine.js';
+import {
+  KARTEN, boden, bodenRaster, bodenFlag, B_BEGEHBAR, B_FARMBAR, istWasser, karteHolen, punkt, zielVon,
+  verbindungen,
+} from './karten.js';
+import { alle, erster, sammle, mod } from './system.js';
+import { zufall, waehle } from './zufall.js';
 
-export const SPEICHER_VERSION = 1;
+export const SPEICHER_VERSION = 2;
+export const SPEICHER_SCHLUESSEL = 'klarwasser-hof-v2';
 export const k = (x, y) => `${x},${y}`;
+export const ausK = (kk) => kk.split(',').map(Number);
 export const RICHTUNG = { oben: [0, -1], unten: [0, 1], links: [-1, 0], rechts: [1, 0] };
-
-export const BLOCKIERT = new Set([
-  'baum', 'stumpf', 'ast', 'stein', 'fels', 'grossstumpf', 'unkraut',
-  'truhe', 'vogelscheuche', 'sprenger', 'qsprenger', 'einmachglas', 'mstein', 'schatz',
-]);
-const AUFSTELLBAR = new Set(['truhe', 'vogelscheuche', 'sprenger', 'qsprenger', 'einmachglas']);
-const MAX_PUNKTE = MAX_HERZEN * PUNKTE_PRO_HERZ;
+export const MAX_PUNKTE = MAX_HERZEN * PUNKTE_PRO_HERZ;
 
 // ─── Neues Spiel ────────────────────────────────────────────────────────────
+
+/** Wo man morgens aufwacht (Punkt „bett" im Haus). */
+export function bettPunkt() {
+  return punkt('haus', 'bett') || { x: 3, y: 4, blick: 'unten' };
+}
 
 export function neuesSpiel({ name = 'Liesel', hof = 'Sonnenhof', aussehen = {}, seed } = {}) {
   seed ??= Math.floor(Math.random() * 2 ** 31);
   const r = zufall(seed);
+  const bett = bettPunkt();
   const s = {
     version: SPEICHER_VERSION,
     seed,
@@ -38,20 +45,14 @@ export function neuesSpiel({ name = 'Liesel', hof = 'Sonnenhof', aussehen = {}, 
       aussehen: { haut: '#f0c8a0', haare: '#6b4428', frisur: 'kurz', hemd: '#c8553d', hose: '#3b4a6b', ...aussehen },
       gold: 500, energie: MAX_ENERGIE, maxEnergie: MAX_ENERGIE, hp: MAX_HP, maxHp: MAX_HP,
       inv: Array(24).fill(null), invGroesse: 24, wahl: 0,
-      werkzeug: { hacke: 0, giesskanne: 0, axt: 0, spitzhacke: 0 },
+      werkzeug: Object.fromEntries(AUFRUESTBAR.map((id) => [id, 0])),
       wasser: KANNE_INHALT[0],
-      xp: { landwirtschaft: 0, angeln: 0, sammeln: 0, bergbau: 0, kampf: 0 },
-      karte: 'haus', x: 3, y: 4, blick: 'unten', tempoBis: 0,
+      xp: Object.fromEntries(Object.keys(FAEHIGKEITEN).map((id) => [id, 0])),
+      karte: 'haus', x: bett.x, y: bett.y, blick: 'unten', tempoBis: 0,
     },
-    zeit: { tag: 1, jz: 0, jahr: 1, minute: TAG_BEGINN, wetter: 'sonne', morgen: 'sonne' },
+    zeit: { tag: 1, jz: 0, jahr: 1, minute: TAG_BEGINN, wetter: 'sonne', morgen: 'sonne', glueck: 0 },
     welt: {},
     npcs: {},
-    quest: null,
-    brett: null,
-    buendel: {},
-    muehle: false,
-    mine: { tiefste: 0, schwert: false, truhen: [] },
-    stall: { gebaut: false, bauMorgen: false, huehner: [] },
     briefe: [],
     post: [],
     versand: [],
@@ -60,18 +61,17 @@ export function neuesSpiel({ name = 'Liesel', hof = 'Sonnenhof', aussehen = {}, 
     stats: { verdient: 0, geerntet: 0, gefangen: 0, baeume: 0, auftraege: 0, tage: 1 },
   };
   ergaenzen(s);
-  for (const id of ['hacke', 'giesskanne', 'axt', 'spitzhacke', 'sense']) hinzufuegen(s, { id, n: 1 });
-  hinzufuegen(s, { id: 'pastinake_saat', n: 15 });
-  verwildern(s, r);
-  for (const id of ['hof', 'dorf', 'strand']) sammelSpawnen(s, id, r, 3);
-  s.brett = questErzeugen(s, r);
+  alle('neuesSpiel', s, r);
+  for (const def of Object.values(KARTEN)) if (def.sammel.length) sammelSpawnen(s, def.id, r, 3);
   s.post = postFuerHeute(s);
   return s;
 }
 
-function ergaenzen(s) {
+/** Fehlende Felder nachtragen – nach dem Anlegen und nach dem Laden. */
+export function ergaenzen(s) {
   s.welt ??= {};
   for (const id of Object.keys(KARTEN)) welt(s, id);
+  s.npcs ??= {};
   for (const id of Object.keys(NPCS)) {
     s.npcs[id] ??= {};
     const n = s.npcs[id];
@@ -81,11 +81,16 @@ function ergaenzen(s) {
     n.herzGesehen ??= [];
     n.herzGeschenke ??= [];
   }
+  const sp = s.spieler;
+  for (const id of AUFRUESTBAR) sp.werkzeug[id] ??= 0;
+  for (const id of Object.keys(FAEHIGKEITEN)) sp.xp[id] ??= 0;
   s.stufeNeu ??= [];
   s.flags ??= {};
   s.versand ??= [];
   s.post ??= [];
   s.briefe ??= [];
+  alle('ergaenzen', s);
+  werteAktualisieren(s);
 }
 
 export function welt(s, id) {
@@ -94,87 +99,156 @@ export function welt(s, id) {
   s.welt[id].felder ??= {};
   return s.welt[id];
 }
-export const ortVon = (s, id) => ({ def: KARTEN[id], welt: welt(s, id) });
+export const ortVon = (s, id) => ({ def: karteHolen(id, s), welt: welt(s, id) });
 
-function imBereich(b, x, y) { return x >= b.x && x < b.x + b.w && y >= b.y && y < b.y + b.h; }
+export const imBereich = (b, x, y) => x >= b.x && x < b.x + b.w && y >= b.y && y < b.y + b.h;
 
-/** Der Hof ist zu Beginn zugewachsen: Bäume, Steine, Unkraut, Äste. */
-function verwildern(s, r) {
-  const def = KARTEN.hof;
-  const w = welt(s, 'hof');
-  for (let y = 1; y < def.h - 1; y++) {
-    for (let x = 1; x < def.w - 1; x++) {
-      if (boden(def, x, y) !== '.') continue;
-      if (def.frei.some((b) => imBereich(b, x, y))) continue;
-      let nahWeg = false;
-      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
-        const b = boden(def, x + dx, y + dy);
-        if (b === ':' || b === '~') nahWeg = true;
+// ─── Bedingungen ────────────────────────────────────────────────────────────
+
+/** Prüft eine Bedingung: Name aus dem Register, „!name", Funktion (s) => bool oder Liste (alle). */
+export function erfuellt(s, b) {
+  if (b == null) return true;
+  if (typeof b === 'function') return !!b(s);
+  if (Array.isArray(b)) return b.every((x) => erfuellt(s, x));
+  const nicht = b.startsWith('!');
+  const fn = BEDINGUNGEN[nicht ? b.slice(1) : b];
+  if (!fn) return true;
+  return nicht ? !fn(s) : !!fn(s);
+}
+
+// ─── Kartenstand: Gebäude, Deko, Blockaden je Karte (gecacht) ───────────────
+
+let aenderung = 0;
+/** Bereiche rufen das, wenn sich ihre dynamischen Gebäude/Deko/Objekte mitten am Tag ändern. */
+export const kartenGeaendert = () => { aenderung++; };
+
+const bedCache = new WeakMap();
+function bedingungenVon(def) {
+  const n = def.gebaeude.length + def.deko.length;
+  const c = bedCache.get(def);
+  if (c && c.n === n) return c.liste;
+  const menge = new Set();
+  for (const g of def.gebaeude) {
+    if (g.nurWenn != null) menge.add(g.nurWenn);
+    if (g.tuerWenn != null) menge.add(g.tuerWenn);
+  }
+  for (const d of def.deko) if (d.nurWenn != null) menge.add(d.nurWenn);
+  const liste = [...menge];
+  bedCache.set(def, { n, liste });
+  return liste;
+}
+
+const standCache = new WeakMap();
+
+/**
+ * Was auf einer Karte gerade steht: feste plus dynamische Gebäude/Deko (Hooks), Blockaden,
+ * Feld-Index für Deko und Gebäude, offene Türen, dynamische Objekte. Neu berechnet, wenn sich
+ * eine Bedingung, der Tag oder kartenGeaendert() ändert.
+ */
+export function kartenStand(s, def) {
+  const z = s.zeit;
+  let schluessel = `${aenderung}|${z.jahr}|${z.jz}|${z.tag}|`;
+  for (const b of bedingungenVon(def)) schluessel += erfuellt(s, b) ? '1' : '0';
+  const c = standCache.get(def);
+  if (c && c.s === s && c.schluessel === schluessel) return c;
+
+  const ort = { def, welt: s.welt?.[def.id] };
+  const gebaeude = [...def.gebaeude, ...sammle('gebaeude', ort, s)].filter((g) => erfuellt(s, g.nurWenn));
+  const deko = [...def.deko, ...sammle('deko', ort, s)].filter((d) => erfuellt(s, d.nurWenn));
+  const W = def.w;
+  const n = def.w * def.h;
+  const blockiert = new Uint8Array(n);
+  const dekoFeld = new Array(n);
+  const gebaeudeFeld = new Array(n);
+  const tuerFeld = new Map();
+  const drin = (x, y) => x >= 0 && y >= 0 && x < def.w && y < def.h;
+  for (const g of gebaeude) {
+    for (let y = g.y; y < g.y + g.h; y++) {
+      for (let x = g.x; x < g.x + g.w; x++) {
+        if (!drin(x, y)) continue;
+        blockiert[y * W + x] = 1;
+        gebaeudeFeld[y * W + x] ??= g;
       }
-      if (nahWeg || !begehbar(s, def, w, x, y)) continue;
-      const z = r();
-      let o = null;
-      if (z < 0.07) o = { t: 'baum', hp: 8, art: r() < 0.3 ? 'kiefer' : 'eiche' };
-      else if (z < 0.12) o = { t: 'stein', hp: 2, v: ganz(r, 0, 2) };
-      else if (z < 0.2) o = { t: 'unkraut', v: ganz(r, 0, 2) };
-      else if (z < 0.235) o = { t: 'ast', v: ganz(r, 0, 1) };
-      else if (z < 0.241) o = { t: 'fels', hp: 6 };
-      else if (z < 0.247) o = { t: 'grossstumpf', hp: 8 };
-      if (o) w.objekte[k(x, y)] = o;
+    }
+    if (g.ziel && g.tuer && erfuellt(s, g.tuerWenn) && drin(g.tuer.x, g.tuer.y)) {
+      blockiert[g.tuer.y * W + g.tuer.x] = 0;
+      tuerFeld.set(g.tuer.y * W + g.tuer.x, g);
     }
   }
+  for (const d of deko) {
+    for (let y = d.y; y < d.y + (d.h || 1); y++) {
+      for (let x = d.x; x < d.x + (d.w || 1); x++) {
+        if (!drin(x, y)) continue;
+        dekoFeld[y * W + x] ??= d;
+        if (!d.wand && !d.begehbar) blockiert[y * W + x] = 1;
+      }
+    }
+  }
+  const objekte = new Map();
+  for (const o of sammle('objekteDynamisch', ort, s)) objekte.set(k(o.x, o.y), o);
+  const stand = { s, schluessel, gebaeude, deko, blockiert, dekoFeld, gebaeudeFeld, tuerFeld, objekte };
+  standCache.set(def, stand);
+  return stand;
 }
 
-// ─── Bedingungen und Begehbarkeit ───────────────────────────────────────────
+export const gebaeudeListe = (s, def) => kartenStand(s, def).gebaeude;
+export const dekoListe = (s, def) => kartenStand(s, def).deko;
 
-export function bedingung(s, b) {
-  switch (b) {
-    case undefined: case null: return true;
-    case 'stall': return s.stall.gebaut;
-    case 'keinStall': return !s.stall.gebaut && !s.stall.bauMorgen;
-    case 'mineOffen': return !!s.flags.mineOffen;
-    case 'keinSchwert': return !s.mine.schwert;
-    case 'keineAngel': return !hat(s, 'angel');
-    case 'rucksack': return s.spieler.invGroesse < 36;
-    default: return true;
-  }
-}
-export const gebaeudeListe = (s, def) => def.gebaeude.filter((g) => bedingung(s, g.nurWenn));
-export const dekoListe = (s, def) => def.deko.filter((d) => bedingung(s, d.nurWenn));
-
-const blockCache = new WeakMap();
-export function statischBlockiert(s, def) {
-  const schluessel = `${s.stall.gebaut}|${s.mine.schwert}|${!!s.flags.mineOffen}|${s.stall.bauMorgen}`;
-  const c = blockCache.get(def);
-  if (c && c.schluessel === schluessel) return c.set;
-  const set = new Set();
-  for (const g of gebaeudeListe(s, def)) {
-    for (let y = g.y; y < g.y + g.h; y++) for (let x = g.x; x < g.x + g.w; x++) set.add(k(x, y));
-    if (g.ziel && bedingung(s, g.tuerWenn)) set.delete(k(g.tuer.x, g.tuer.y));
-  }
-  for (const d of dekoListe(s, def)) {
-    if (d.wand || d.begehbar) continue;
-    for (let y = d.y; y < d.y + (d.h || 1); y++) for (let x = d.x; x < d.x + (d.w || 1); x++) set.add(k(x, y));
-  }
-  blockCache.set(def, { schluessel, set });
-  return set;
-}
+const objektBlockiert = (o) => !!(o && OBJEKT_TYPEN[o.t]?.blockiert);
 
 export function begehbar(s, def, w, x, y) {
-  if (BLOCK_BODEN.has(boden(def, x, y))) return false;
-  if (statischBlockiert(s, def).has(k(x, y))) return false;
-  const o = w?.objekte[k(x, y)];
-  return !(o && BLOCKIERT.has(o.t));
+  if (x < 0 || y < 0 || x >= def.w || y >= def.h) return false;
+  const i = y * def.w + x;
+  if (!(bodenRaster(def)[i] & B_BEGEHBAR)) return false;
+  const st = kartenStand(s, def);
+  if (st.blockiert[i]) return false;
+  const kk = k(x, y);
+  return !objektBlockiert(w?.objekte[kk] ?? st.objekte.get(kk));
 }
 
+/** Schnelle Prüf-Funktion (x, y) => bool für Wegsuchen über viele Felder. */
+export function begehbarPruefer(s, def, w) {
+  const flags = bodenRaster(def);
+  const st = kartenStand(s, def);
+  const objekte = w?.objekte || {};
+  const W = def.w;
+  return (x, y) => {
+    if (x < 0 || y < 0 || x >= W || y >= def.h) return false;
+    const i = y * W + x;
+    if (!(flags[i] & B_BEGEHBAR) || st.blockiert[i]) return false;
+    const kk = k(x, y);
+    return !objektBlockiert(objekte[kk] ?? st.objekte.get(kk));
+  };
+}
+
+const feldIndex = (def, x, y) => (x < 0 || y < 0 || x >= def.w || y >= def.h ? -1 : y * def.w + x);
 export function dekoAn(s, def, x, y) {
-  return dekoListe(s, def).find((d) => x >= d.x && x < d.x + (d.w || 1) && y >= d.y && y < d.y + (d.h || 1));
+  const i = feldIndex(def, x, y);
+  return i < 0 ? undefined : kartenStand(s, def).dekoFeld[i];
 }
 export function gebaeudeAn(s, def, x, y) {
-  return gebaeudeListe(s, def).find((g) => x >= g.x && x < g.x + g.w && y >= g.y && y < g.y + g.h);
+  const i = feldIndex(def, x, y);
+  return i < 0 ? undefined : kartenStand(s, def).gebaeudeFeld[i];
+}
+/** Offene Tür (mit Ziel) auf diesem Feld. */
+export function tuerAn(s, def, x, y) {
+  const i = feldIndex(def, x, y);
+  return i < 0 ? undefined : kartenStand(s, def).tuerFeld.get(i);
 }
 export function warpAn(def, x, y) {
   return def.warps.find((w) => imBereich(w, x, y));
+}
+/** Objekt auf einem Feld: gespeichert oder dynamisch (Hook objekteDynamisch). */
+export function objektAn(s, ort, x, y) {
+  const kk = k(x, y);
+  return ort.welt.objekte[kk] ?? kartenStand(s, ort.def).objekte.get(kk);
+}
+/** Alle Objekte eines Orts als [schlüssel, objekt], dynamische eingeschlossen. */
+export function alleObjekte(s, ort) {
+  const liste = Object.entries(ort.welt.objekte);
+  const dyn = kartenStand(s, ort.def).objekte;
+  if (dyn.size) for (const e of dyn) liste.push(e);
+  return liste;
 }
 
 // ─── Zeit ───────────────────────────────────────────────────────────────────
@@ -187,14 +261,40 @@ export function uhrzeit(minute) {
 }
 export const regnet = (s) => s.zeit.wetter === 'regen' || s.zeit.wetter === 'sturm';
 export const jahreszeit = (s) => JZ[s.zeit.jz];
+export const glueck = (s) => s.zeit.glueck ?? 0;
+/** Plan-Uhrzeit 1730 → Minuten seit Mitternacht. */
+export const planMinute = (zeit) => Math.floor(zeit / 100) * 60 + (zeit % 100);
+
+let minutenStand = -1;
+let minutenTypen = new Set();
+/** Die Spielzeit rückt um n Minuten vor: Objekte mit `minuten` und der Hook `minuten`. */
+export function zeitVergeht(s, n) {
+  const anzahl = Object.keys(OBJEKT_TYPEN).length;
+  if (anzahl !== minutenStand) {
+    minutenStand = anzahl;
+    minutenTypen = new Set(Object.values(OBJEKT_TYPEN).filter((t) => t.minuten).map((t) => t.t));
+  }
+  if (minutenTypen.size) {
+    for (const [id, w] of Object.entries(s.welt)) {
+      const def = karteHolen(id, s);
+      if (!def) continue;
+      for (const [kk, o] of Object.entries(w.objekte)) {
+        if (!minutenTypen.has(o.t)) continue;
+        const [x, y] = ausK(kk);
+        OBJEKT_TYPEN[o.t].minuten({ s, ort: { def, welt: w }, x, y, kk, o }, n);
+      }
+    }
+  }
+  alle('minuten', s, n);
+}
 
 // ─── Rucksack ───────────────────────────────────────────────────────────────
 
-export const stapelbar = (id) => ITEMS[id].kat !== 'werkzeug';
+export const stapelbar = (id) => ITEMS[id]?.stapel !== false;
 export const gleich = (a, b) => a.id === b.id && (a.q || 0) === (b.q || 0) && (a.von || null) === (b.von || null);
 export const hat = (s, id) => s.spieler.inv.some((x) => x && x.id === id);
 
-function slotKopie(slot, n) {
+export function slotKopie(slot, n) {
   const neu = { id: slot.id, n };
   if (slot.q) neu.q = slot.q;
   if (slot.von) neu.von = slot.von;
@@ -276,63 +376,69 @@ export function tauschen(s, a, b) {
   [inv[a], inv[b]] = [inv[b], inv[a]];
 }
 
+/** Grundpreis ohne Qualität; Items mit `wert(slot)` rechnen selbst (Marmelade aus Obst …). */
 export function grundpreis(slot) {
   const it = ITEMS[slot.id];
-  if (it.kat === 'artisan' && slot.von) return ITEMS[slot.von].preis * 2 + 50;
-  return it.preis;
+  return typeof it.wert === 'function' ? it.wert(slot) : it.preis;
 }
-export const preisVon = (slot) => Math.floor(grundpreis(slot) * QUALITAET[slot.q || 0].faktor);
+const mitQualitaet = (slot) => Math.floor(grundpreis(slot) * QUALITAET[slot.q || 0].faktor);
+/** Verkaufspreis eines Stücks; `s` reicht den Spielstand an den Modifikator weiter. */
+export const preisVon = (slot, s) => Math.floor(mod('verkaufspreis', mitQualitaet(slot), { s, slot }));
 
 export function nameVon(slot, s) {
   const it = ITEMS[slot.id];
-  if (it.kat === 'artisan' && slot.von) return `${it.name} (${ITEMS[slot.von].name})`;
+  if (slot.von && ITEMS[slot.von]) return `${it.name} (${ITEMS[slot.von].name})`;
   if (s && it.kat === 'werkzeug' && AUFRUESTBAR.includes(slot.id)) return werkzeugName(slot.id, s.spieler.werkzeug[slot.id]);
   return it.name;
 }
 
 export function werkzeugName(id, stufe) {
   if (!stufe) return ITEMS[id].name;
-  const grund = { hacke: 'hacke', giesskanne: 'gießkanne', axt: 'axt', spitzhacke: 'spitzhacke' }[id];
-  return `${WERKZEUG_STUFEN[stufe].name}${grund}`;
+  return `${WERKZEUG_STUFEN[stufe].name}${ITEMS[id].name.toLowerCase()}`;
 }
 
 export function energieVon(slot) {
   const it = ITEMS[slot.id];
-  let e = it.energie || 0;
-  if (it.kat === 'artisan' && slot.von) e = Math.round((ITEMS[slot.von].energie || 20) * 2);
+  const e = typeof it.energie === 'function' ? it.energie(slot) : it.energie || 0;
   return Math.round(e * (1 + 0.4 * (slot.q || 0)));
 }
-export const essbar = (slot) => !!slot && (energieVon(slot) > 0 || !!ITEMS[slot.id].tempo);
+export const essbar = (slot) => !!slot && (energieVon(slot) > 0 || !!ITEMS[slot.id].tempo || !!ITEMS[slot.id].buff);
 
 export function verkaufbar(slot) {
-  const it = ITEMS[slot.id];
-  return !['werkzeug', 'platz', 'besonders'].includes(it.kat) && preisVon(slot) > 0;
+  return !!ITEMS[slot.id].verkaufbar && mitQualitaet(slot) > 0;
 }
 
 // ─── Fähigkeiten ────────────────────────────────────────────────────────────
 
 export function stufe(s, skill) {
-  const xp = s.spieler.xp[skill];
+  const xp = s.spieler.xp[skill] || 0;
   let l = 0;
   while (l < 10 && xp >= XP_STUFEN[l]) l++;
   return l;
 }
 
+/** Höchstwerte neu berechnen (Kampfstufe, Modifikatoren maxEnergie/maxGesundheit). */
+export function werteAktualisieren(s) {
+  const sp = s.spieler;
+  sp.maxEnergie = Math.round(mod('maxEnergie', MAX_ENERGIE, { s }));
+  sp.maxHp = Math.round(mod('maxGesundheit', MAX_HP + 5 * stufe(s, 'kampf'), { s }));
+}
+
 export function xpGeben(s, skill, n, erg) {
   const vor = stufe(s, skill);
-  s.spieler.xp[skill] += Math.round(n);
+  s.spieler.xp[skill] += Math.round(mod('xp', n, { s, skill }));
   const nach = stufe(s, skill);
   if (nach > vor) {
     s.stufeNeu.push({ skill, stufe: nach });
     if (erg) erg.stufe = { skill, stufe: nach };
-    if (skill === 'kampf') s.spieler.maxHp = MAX_HP + 5 * nach;
+    werteAktualisieren(s);
   }
 }
 
 export function energieKosten(s, id, ladung = 0) {
-  const skill = { hacke: 'landwirtschaft', giesskanne: 'landwirtschaft', axt: 'sammeln', spitzhacke: 'bergbau' }[id];
-  if (!skill) return 0;
-  return Math.max(0.5, 2 - 0.1 * stufe(s, skill)) * (ladung + 1);
+  const art = WERKZEUG_ARTEN[ITEMS[id]?.werkzeug];
+  if (!art?.skill) return 0;
+  return mod('energieKosten', Math.max(0.5, 2 - 0.1 * stufe(s, art.skill)) * (ladung + 1), { s, werkzeug: id, ladung });
 }
 
 // ─── Feldarbeit ─────────────────────────────────────────────────────────────
@@ -347,7 +453,8 @@ export function werkzeugFelder(zx, zy, blick, ladung = 0) {
     const lang = ladung === 1 ? 3 : 5;
     for (let i = 0; i < lang; i++) felder.push([zx + dx * i, zy + dy * i]);
   } else {
-    for (let i = 0; i < 3; i++) for (let j = -1; j <= 1; j++) felder.push([zx + dx * i + quer[0] * j, zy + dy * i + quer[1] * j]);
+    const lang = ladung === 3 ? 3 : 6;
+    for (let i = 0; i < lang; i++) for (let j = -1; j <= 1; j++) felder.push([zx + dx * i + quer[0] * j, zy + dy * i + quer[1] * j]);
   }
   return felder;
 }
@@ -369,19 +476,25 @@ export function geben(s, ort, x, y, slot, erg) {
   }
 }
 
-const neuesErgebnis = () => ({ items: [] });
+export const neuesErgebnis = () => ({ items: [] });
 
-export function hacken(s, ort, felder) {
+function werkzeugKontext(s, ort, x, y, art, r, erg) {
+  const kk = k(x, y);
+  const stufe = s.spieler.werkzeug[art] || 0;
+  return { s, ort, x, y, kk, o: ort.welt.objekte[kk], erg, r, art, stufe, kraft: 1 + stufe };
+}
+
+export function hacken(s, ort, felder, r = Math.random) {
   const { def, welt: w } = ort;
   const erg = neuesErgebnis();
   erg.n = 0;
   for (const [x, y] of felder) {
     if (!def.farmbar) { erg.grund = 'Hier lässt sich nichts anbauen. Dafür ist dein Hof da.'; break; }
-    const b = boden(def, x, y);
-    if (b !== '.' && b !== ':') continue;
-    const kk = k(x, y);
-    if (w.felder[kk] || w.objekte[kk] || !begehbar(s, def, w, x, y) || warpAn(def, x, y)) continue;
-    w.felder[kk] = { nass: regnet(s) };
+    const c = werkzeugKontext(s, ort, x, y, 'hacke', r, erg);
+    if (c.o) { OBJEKT_TYPEN[c.o.t]?.hacke?.(c); continue; }
+    if (!bodenFlag(def, x, y, B_FARMBAR)) continue;
+    if (w.felder[c.kk] || !begehbar(s, def, w, x, y) || warpAn(def, x, y)) continue;
+    w.felder[c.kk] = { nass: regnet(s) };
     erg.n++;
   }
   return erg;
@@ -392,8 +505,8 @@ export function giessen(s, ort, felder) {
   const sp = s.spieler;
   const erg = neuesErgebnis();
   const [fx, fy] = felder[0];
-  if (boden(def, fx, fy) === '~') {
-    sp.wasser = KANNE_INHALT[sp.werkzeug.giesskanne];
+  if (istWasser(def, fx, fy)) {
+    sp.wasser = KANNE_INHALT[sp.werkzeug.giesskanne || 0];
     erg.gefuellt = true;
     return erg;
   }
@@ -452,7 +565,7 @@ export function ernten(s, ort, x, y, r = Math.random) {
   const def = PFLANZEN[p.id];
   if (platzFuer(s, { id: def.ernte, n: 1 }) < 1) return { grund: 'Dein Rucksack ist voll.', items: [] };
   const erg = neuesErgebnis();
-  const q = qualitaetWuerfeln(stufe(s, 'landwirtschaft'), f.duenger, r);
+  const q = mod('ernteQualitaet', qualitaetWuerfeln(stufe(s, 'landwirtschaft'), f.duenger, r), { s, ort, x, y, feld: f, pflanze: def });
   let n = def.menge;
   if (def.extra && r() < def.extra) n++;
   geben(s, ort, x, y, { id: def.ernte, n: 1, q }, erg);
@@ -465,146 +578,39 @@ export function ernten(s, ort, x, y, r = Math.random) {
   return erg;
 }
 
-function unkrautWeg(s, ort, x, y, erg, r) {
-  delete ort.welt.objekte[k(x, y)];
-  if (r() < 0.5) geben(s, ort, x, y, { id: 'faser', n: 1 }, erg);
-  erg.treffer = 'unkraut';
-}
-
-function aufheben(s, ort, x, y, o, erg) {
-  if (o.t === 'truhe' && o.inv.some(Boolean)) { erg.grund = 'Die Truhe ist nicht leer.'; return; }
-  if (o.t === 'einmachglas' && o.inhalt) { erg.grund = 'Im Einmachglas ist noch etwas.'; return; }
-  if (platzFuer(s, { id: o.t, n: 1 }) < 1) { erg.grund = 'Dein Rucksack ist voll.'; return; }
-  delete ort.welt.objekte[k(x, y)];
-  geben(s, ort, x, y, { id: o.t, n: 1 }, erg);
-  erg.treffer = 'aufheben';
-}
+// Werkzeuge auf Objekten: was passiert, entscheidet der Objekttyp (daten.js: objektTyp).
 
 export function axtHieb(s, ort, x, y, r = Math.random) {
-  const w = ort.welt;
-  const kk = k(x, y);
-  const o = w.objekte[kk];
-  const lvl = s.spieler.werkzeug.axt;
-  const kraft = 1 + lvl;
   const erg = neuesErgebnis();
-  if (!o) return erg;
-  if (o.t === 'baum') {
-    o.hp -= kraft;
-    erg.treffer = 'holz';
-    if (o.hp <= 0) {
-      geben(s, ort, x, y, { id: 'holz', n: ganz(r, 10, 14) }, erg);
-      if (r() < 0.6) geben(s, ort, x, y, { id: 'saft', n: ganz(r, 1, 3) }, erg);
-      xpGeben(s, 'sammeln', 12, erg);
-      w.objekte[kk] = { t: 'stumpf', hp: 4, art: o.art };
-      s.stats.baeume++;
-      erg.gefallen = o.art || 'eiche';
-    }
-  } else if (o.t === 'stumpf') {
-    o.hp -= kraft;
-    erg.treffer = 'holz';
-    if (o.hp <= 0) {
-      delete w.objekte[kk];
-      geben(s, ort, x, y, { id: 'holz', n: ganz(r, 3, 5) }, erg);
-      xpGeben(s, 'sammeln', 2, erg);
-    }
-  } else if (o.t === 'ast') {
-    delete w.objekte[kk];
-    geben(s, ort, x, y, { id: 'holz', n: ganz(r, 1, 2) }, erg);
-    erg.treffer = 'holz';
-  } else if (o.t === 'grossstumpf') {
-    if (lvl < 1) {
-      erg.grund = 'Dieser Stumpf ist zu zäh. Bruno kann deine Axt verbessern.';
-      erg.treffer = 'abprall';
-    } else {
-      o.hp -= kraft;
-      erg.treffer = 'holz';
-      if (o.hp <= 0) {
-        delete w.objekte[kk];
-        geben(s, ort, x, y, { id: 'hartholz', n: 2 }, erg);
-        xpGeben(s, 'sammeln', 25, erg);
-      }
-    }
-  } else if (o.t === 'unkraut') {
-    unkrautWeg(s, ort, x, y, erg, r);
-  } else if (AUFSTELLBAR.has(o.t)) {
-    aufheben(s, ort, x, y, o, erg);
-  }
+  const c = werkzeugKontext(s, ort, x, y, 'axt', r, erg);
+  if (c.o) OBJEKT_TYPEN[c.o.t]?.axt?.(c);
   return erg;
 }
 
 export function spitzhackeHieb(s, ort, x, y, r = Math.random) {
-  const w = ort.welt;
-  const kk = k(x, y);
-  const o = w.objekte[kk];
-  const lvl = s.spieler.werkzeug.spitzhacke;
-  const kraft = 1 + lvl;
   const erg = neuesErgebnis();
-  if (!o) {
-    const f = w.felder[kk];
+  const c = werkzeugKontext(s, ort, x, y, 'spitzhacke', r, erg);
+  if (!c.o) {
+    const f = ort.welt.felder[c.kk];
     if (f && !f.pflanze) {
-      delete w.felder[kk];
+      delete ort.welt.felder[c.kk];
       erg.treffer = 'erde';
     }
     return erg;
   }
-  if (o.t === 'stein') {
-    o.hp -= kraft;
-    erg.treffer = 'stein';
-    if (o.hp <= 0) {
-      delete w.objekte[kk];
-      geben(s, ort, x, y, { id: 'stein', n: ganz(r, 1, 2) }, erg);
-      if (r() < 0.04) geben(s, ort, x, y, { id: 'kohle', n: 1 }, erg);
-      xpGeben(s, 'bergbau', 1, erg);
-    }
-  } else if (o.t === 'fels') {
-    if (lvl < 1) {
-      erg.grund = 'Dieser Felsbrocken ist zu hart. Bruno kann deine Spitzhacke verbessern.';
-      erg.treffer = 'abprall';
-    } else {
-      o.hp -= kraft;
-      erg.treffer = 'stein';
-      if (o.hp <= 0) {
-        delete w.objekte[kk];
-        geben(s, ort, x, y, { id: 'stein', n: ganz(r, 10, 15) }, erg);
-        if (r() < 0.5) geben(s, ort, x, y, { id: 'kupfererz', n: ganz(r, 1, 3) }, erg);
-        xpGeben(s, 'bergbau', 15, erg);
-      }
-    }
-  } else if (o.t === 'mstein') {
-    o.hp -= kraft;
-    erg.treffer = 'stein';
-    if (o.hp <= 0) {
-      const ebene = ort.def.ebene || 1;
-      const ertrag = steinErtrag(o.art, ebene, r, stufe(s, 'bergbau'));
-      delete w.objekte[kk];
-      for (const it of ertrag.items) geben(s, ort, x, y, it, erg);
-      xpGeben(s, 'bergbau', ertrag.xp, erg);
-      erg.zerbrochen = o.art;
-      if (o.leiter || (ebene < 30 && r() < 0.025)) {
-        w.objekte[kk] = { t: 'leiter' };
-        erg.leiter = true;
-      }
-    }
-  } else if (o.t === 'unkraut') {
-    unkrautWeg(s, ort, x, y, erg, r);
-  } else if (AUFSTELLBAR.has(o.t)) {
-    aufheben(s, ort, x, y, o, erg);
-  }
+  OBJEKT_TYPEN[c.o.t]?.spitzhacke?.(c);
   return erg;
 }
 
-export function senseSchnitt(s, ort, felder, r = Math.random) {
+/** Sense (oder Waffe) im Bogen: Objekte nach ihrem Typ, verwelkte Pflanzen weg. */
+export function senseSchnitt(s, ort, felder, r = Math.random, art = 'sense') {
   const w = ort.welt;
   const erg = neuesErgebnis();
   erg.n = 0;
   for (const [x, y] of felder) {
-    const kk = k(x, y);
-    const o = w.objekte[kk];
-    if (o && o.t === 'unkraut') {
-      unkrautWeg(s, ort, x, y, erg, r);
-      erg.n++;
-    }
-    const f = w.felder[kk];
+    const c = werkzeugKontext(s, ort, x, y, art, r, erg);
+    if (c.o && OBJEKT_TYPEN[c.o.t]?.[art]?.(c)) erg.n++;
+    const f = w.felder[c.kk];
     if (f?.pflanze?.tot) {
       f.pflanze = null;
       erg.n++;
@@ -613,44 +619,35 @@ export function senseSchnitt(s, ort, felder, r = Math.random) {
   return erg;
 }
 
+/** Aufgestelltes wieder einsammeln (Axt/Spitzhacke). Für Objekttypen wie Truhe oder Glas. */
+export function aufheben(c) {
+  const { s, ort, x, y, o, erg } = c;
+  const typ = OBJEKT_TYPEN[o.t];
+  const grund = typ?.nichtLeer?.(o);
+  if (grund) { erg.grund = grund; return true; }
+  const id = typ?.item ?? o.t;
+  if (platzFuer(s, { id, n: 1 }) < 1) { erg.grund = 'Dein Rucksack ist voll.'; return true; }
+  delete ort.welt.objekte[k(x, y)];
+  geben(s, ort, x, y, { id, n: 1 }, erg);
+  erg.treffer = 'aufheben';
+  return true;
+}
+
 export function aufstellen(s, ort, x, y, idx) {
   const slot = s.spieler.inv[idx];
+  const it = ITEMS[slot.id];
   const { def, welt: w } = ort;
   if (!def.farmbar) return { grund: 'Das kannst du nur auf deinem Hof aufstellen.' };
   const kk = k(x, y);
   if (w.objekte[kk] || w.felder[kk] || !begehbar(s, def, w, x, y) || warpAn(def, x, y)) return { grund: 'Hier ist kein Platz.' };
-  const o = { t: slot.id };
-  if (slot.id === 'truhe') o.inv = Array(24).fill(null);
-  if (slot.id === 'einmachglas') { o.inhalt = null; o.fertig = false; }
+  const o = { t: typeof it.aufstellbar === 'string' ? it.aufstellbar : slot.id };
+  OBJEKT_TYPEN[o.t]?.anlegen?.(o, slot);
   w.objekte[kk] = o;
   entfernenAusSlot(s, idx, 1);
   return { ok: true };
 }
 
-export function glasBenutzen(s, ort, x, y, idx) {
-  const o = ort.welt.objekte[k(x, y)];
-  const erg = neuesErgebnis();
-  if (o.fertig) {
-    if (platzFuer(s, { ...o.inhalt, n: 1 }) < 1) return { grund: 'Dein Rucksack ist voll.', items: [] };
-    geben(s, ort, x, y, { id: o.inhalt.id, von: o.inhalt.von, n: 1 }, erg);
-    o.inhalt = null;
-    o.fertig = false;
-    erg.ok = true;
-    return erg;
-  }
-  if (o.inhalt) return { grund: `${ITEMS[o.inhalt.von].name} wird eingemacht. Morgen früh ist es fertig.`, items: [] };
-  const slot = idx != null ? s.spieler.inv[idx] : null;
-  const it = slot && ITEMS[slot.id];
-  if (!it || !['ernte', 'sammel'].includes(it.kat) || !(it.frucht || it.gemuese)) {
-    return { grund: 'Halte Obst oder Gemüse in der Hand und benutze das Glas damit.', items: [] };
-  }
-  o.inhalt = { id: it.frucht ? 'marmelade' : 'eingelegt', von: slot.id };
-  entfernenAusSlot(s, idx, 1);
-  erg.ok = true;
-  erg.text = `${it.name} eingelegt. Morgen früh ist es fertig.`;
-  return erg;
-}
-
+/** Sammelfund (Objekt „sammel" mit id) aufheben. */
 export function aufsammeln(s, ort, x, y, r = Math.random) {
   const o = ort.welt.objekte[k(x, y)];
   if (!o || o.t !== 'sammel') return null;
@@ -665,18 +662,7 @@ export function aufsammeln(s, ort, x, y, r = Math.random) {
   }
   delete ort.welt.objekte[k(x, y)];
   geben(s, ort, x, y, { id: o.id, n: 1, q }, erg);
-  if (it.kat === 'tier') xpGeben(s, 'landwirtschaft', 5, erg);
-  else xpGeben(s, 'sammeln', 7, erg);
-  erg.ok = true;
-  return erg;
-}
-
-export function schatzOeffnen(s, ort, x, y) {
-  const o = ort.welt.objekte[k(x, y)];
-  const erg = neuesErgebnis();
-  for (const it of SCHATZ[o.ebene] || []) geben(s, ort, x, y, it, erg);
-  s.mine.truhen.push(o.ebene);
-  delete ort.welt.objekte[k(x, y)];
+  xpGeben(s, it.xp?.[0] ?? (it.kat === 'tier' ? 'landwirtschaft' : 'sammeln'), it.xp?.[1] ?? (it.kat === 'tier' ? 5 : 7), erg);
   erg.ok = true;
   return erg;
 }
@@ -685,13 +671,16 @@ export function essen(s, idx) {
   const slot = s.spieler.inv[idx];
   if (!essbar(slot)) return null;
   const sp = s.spieler;
+  const it = ITEMS[slot.id];
   const e = energieVon(slot);
   const name = nameVon(slot);
+  const g = typeof it.gesundheit === 'function' ? it.gesundheit(slot) : it.gesundheit ?? Math.round(e * 0.45);
   sp.energie = Math.min(sp.maxEnergie, sp.energie + e);
-  sp.hp = Math.min(sp.maxHp, sp.hp + Math.round(e * 0.45));
-  if (ITEMS[slot.id].tempo) sp.tempoBis = s.zeit.minute + ITEMS[slot.id].tempo;
+  sp.hp = Math.min(sp.maxHp, sp.hp + g);
+  if (it.tempo) sp.tempoBis = s.zeit.minute + it.tempo;
   entfernenAusSlot(s, idx, 1);
-  return { energie: e, name, tempo: !!ITEMS[slot.id].tempo };
+  alle('gegessen', s, slot);
+  return { energie: e, name, tempo: !!it.tempo };
 }
 
 // ─── Versand und Truhen ─────────────────────────────────────────────────────
@@ -720,7 +709,7 @@ export function versandZurueck(s) {
   return true;
 }
 
-export const versandWert = (s) => s.versand.reduce((g, x) => g + preisVon(x) * x.n, 0);
+export const versandWert = (s) => s.versand.reduce((g, x) => g + preisVon(x, s) * x.n, 0);
 
 /** Verschiebt einen ganzen Stapel zwischen Rucksack und Truhe. */
 export function umlagern(von, idx, nach) {
@@ -746,29 +735,33 @@ export function wetterWuerfeln(s, r = Math.random) {
   return z < sturm ? 'sturm' : z < sturm + regen ? 'regen' : 'sonne';
 }
 
+/** Sammelfunde, die in einer Zone dieser Art wachsen (Item-Feld `fundort`, Standard „wald"). */
 export function sammelPool(art, jz) {
   return Object.values(ITEMS)
-    .filter((i) => i.kat === 'sammel' && (art === 'strand' ? i.strand : !i.strand) && (!i.jz || i.jz.includes(jz)))
+    .filter((i) => i.kat === 'sammel' && (i.fundort ?? 'wald') === art && (!i.jz || i.jz.includes(jz)))
     .map((i) => i.id);
 }
 
 export function sammelSpawnen(s, id, r, anzahlNeu) {
-  const def = KARTEN[id];
+  const def = karteHolen(id, s);
   const w = welt(s, id);
   const jz = jahreszeit(s);
-  for (const zone of def.sammel) {
+  if (!def.sammel.length) return;
+  const da = def.sammel.map(() => 0);
+  for (const [kk, o] of Object.entries(w.objekte)) {
+    if (o.t !== 'sammel' || !o.wild) continue;
+    const [x, y] = ausK(kk);
+    def.sammel.forEach((zone, i) => { if (imBereich(zone, x, y)) da[i]++; });
+  }
+  def.sammel.forEach((zone, zi) => {
     const pool = sammelPool(zone.art, jz);
-    if (!pool.length) continue;
-    const da = Object.entries(w.objekte).filter(([kk, o]) => {
-      const [x, y] = kk.split(',').map(Number);
-      return o.t === 'sammel' && o.wild && imBereich(zone, x, y);
-    }).length;
-    let n = Math.min(anzahlNeu, zone.max - da);
+    if (!pool.length) return;
+    const zielBoden = zone.boden ?? (zone.art === 'strand' ? 's' : '.');
+    let n = Math.min(anzahlNeu, zone.max - da[zi]);
     for (let versuch = 0; versuch < 60 && n > 0; versuch++) {
       const x = zone.x + Math.floor(r() * zone.w);
       const y = zone.y + Math.floor(r() * zone.h);
-      const b = boden(def, x, y);
-      if (b !== (zone.art === 'strand' ? 's' : '.')) continue;
+      if (boden(def, x, y) !== zielBoden) continue;
       const kk = k(x, y);
       if (w.objekte[kk] || w.felder[kk] || !begehbar(s, def, w, x, y)) continue;
       let wahl = waehle(r, pool);
@@ -776,49 +769,7 @@ export function sammelSpawnen(s, id, r, anzahlNeu) {
       w.objekte[kk] = { t: 'sammel', id: wahl, wild: true };
       n--;
     }
-  }
-}
-
-function nachwachsen(s, r) {
-  const def = KARTEN.hof;
-  const w = welt(s, 'hof');
-  const winter = jahreszeit(s) === 'winter';
-  const ziel = ganz(r, 1, 4);
-  let gesetzt = 0;
-  for (let i = 0; i < 60 && gesetzt < ziel; i++) {
-    const x = ganz(r, 1, def.w - 2);
-    const y = ganz(r, 2, def.h - 3);
-    const kk = k(x, y);
-    if (boden(def, x, y) !== '.' || def.frei.some((b) => imBereich(b, x, y))) continue;
-    if (w.objekte[kk] || w.felder[kk] || !begehbar(s, def, w, x, y)) continue;
-    const z = r();
-    if (winter) w.objekte[kk] = z < 0.5 ? { t: 'stein', hp: 2, v: ganz(r, 0, 2) } : { t: 'ast', v: ganz(r, 0, 1) };
-    else w.objekte[kk] = z < 0.6 ? { t: 'unkraut', v: ganz(r, 0, 2) } : z < 0.85 ? { t: 'stein', hp: 2, v: ganz(r, 0, 2) } : { t: 'ast', v: ganz(r, 0, 1) };
-    gesetzt++;
-  }
-}
-
-function eierLegen(s, r, bericht) {
-  const def = KARTEN.hof;
-  const w = welt(s, 'hof');
-  const a = def.auslauf;
-  let gelegt = 0;
-  for (const h of s.stall.huehner) {
-    h.freundschaft = Math.max(0, Math.min(1000, h.freundschaft + (h.gestreichelt ? 15 : -5)));
-    h.gestreichelt = false;
-    if (h.neu) { h.neu = false; continue; }
-    const id = r() < (h.freundschaft / 1000) * 0.6 ? 'grossesei' : 'ei';
-    for (let versuch = 0; versuch < 40; versuch++) {
-      const x = a.x + Math.floor(r() * a.w);
-      const y = a.y + Math.floor(r() * a.h);
-      const kk = k(x, y);
-      if (boden(def, x, y) === '~' || w.objekte[kk] || w.felder[kk] || !begehbar(s, def, w, x, y)) continue;
-      w.objekte[kk] = { t: 'sammel', id };
-      gelegt++;
-      break;
-    }
-  }
-  if (gelegt) bericht.meldungen.push(gelegt === 1 ? 'Im Auslauf liegt ein frisches Ei.' : `Im Auslauf liegen ${gelegt} frische Eier.`);
+  });
 }
 
 export function postFuerHeute(s) {
@@ -826,7 +777,9 @@ export function postFuerHeute(s) {
   const jz = jahreszeit(s);
   const post = [];
   for (const b of BRIEFE) {
+    if (b.start) continue;
     if (b.tagNr && b.tagNr <= heute && !s.briefe.includes(b.id)) post.push(b.id);
+    if (b.wann && !s.briefe.includes(b.id) && b.wann(s)) post.push(b.id);
     const jahresId = `${b.id}_${s.zeit.jahr}`;
     if (b.jz && b.jz === jz && b.tag === s.zeit.tag && !s.briefe.includes(jahresId)) post.push(jahresId);
   }
@@ -843,15 +796,16 @@ export function briefVon(id) {
 }
 
 /**
- * Die Nacht: Versand auszahlen, Kalender weiter, Pflanzen wachsen lassen, Wetter,
- * Sprenger, Krähen, Einmachgläser, Hühner, Aufträge, Post. Gibt einen Bericht zurück.
+ * Die Nacht: Versand auszahlen, Kalender und Wetter weiter, Pflanzen wachsen lassen,
+ * Regen, Objekte über Nacht (Sprenger, Gläser …), dann der Hook `tagEnde` der Bereiche,
+ * Sammelfunde, Post und am Ende `morgen`. Gibt einen Bericht für den Tagesabschluss zurück.
  */
 export function tagBeenden(s, { ohnmacht = false, r = Math.random } = {}) {
   const sp = s.spieler;
   const bericht = { verkauf: [], summe: 0, meldungen: [], stufen: [] };
 
   for (const slot of s.versand) {
-    const preis = preisVon(slot) * slot.n;
+    const preis = preisVon(slot, s) * slot.n;
     bericht.summe += preis;
     bericht.verkauf.push({ slot, preis });
   }
@@ -876,101 +830,74 @@ export function tagBeenden(s, { ohnmacht = false, r = Math.random } = {}) {
   }
   const neueJz = JZ[z.jz];
   const jzWechsel = z.jz !== alteJz;
+  bericht.jzWechsel = jzWechsel;
   z.minute = TAG_BEGINN;
   z.wetter = z.morgen;
   z.morgen = wetterWuerfeln(s, r);
 
-  const hof = welt(s, 'hof');
+  // Pflanzen auf allen Karten mit Beeten
   let verwelkt = 0;
-  for (const [kk, f] of Object.entries(hof.felder)) {
-    const p = f.pflanze;
-    if (p && !p.tot) {
-      const def = PFLANZEN[p.id];
-      if (f.nass && p.tage < def.tage) p.tage++;
-      if (jzWechsel && !def.jz.includes(neueJz)) { p.tot = true; verwelkt++; }
+  for (const [id, w] of Object.entries(s.welt)) {
+    const def = karteHolen(id, s);
+    if (!def) continue;
+    const ort = { def, welt: w };
+    for (const [kk, f] of Object.entries(w.felder)) {
+      const p = f.pflanze;
+      if (p && !p.tot) {
+        const pd = PFLANZEN[p.id];
+        if (f.nass && p.tage < pd.tage) p.tage = Math.min(pd.tage, p.tage + mod('wachstum', 1, { s, ort, feld: f, pflanze: pd }));
+        if (jzWechsel && def.aussen && !pd.jz.includes(neueJz)) { p.tot = true; verwelkt++; }
+      }
+      if (!f.pflanze && !f.nass && r() < 0.1) { delete w.felder[kk]; continue; }
+      f.nass = false;
     }
-    if (!f.pflanze && !f.nass && r() < 0.1) { delete hof.felder[kk]; continue; }
-    f.nass = false;
   }
   if (jzWechsel) {
     bericht.meldungen.push(`Der ${JZ_NAME[neueJz]} beginnt.`);
     if (verwelkt) bericht.meldungen.push(`${verwelkt} ${verwelkt === 1 ? 'Pflanze ist' : 'Pflanzen sind'} über Nacht verwelkt – sie wachsen nicht im ${JZ_NAME[neueJz]}.`);
   }
 
-  // Krähen
-  if (neueJz !== 'winter') {
-    const pflanzen = Object.entries(hof.felder).filter(([, f]) => f.pflanze && !f.pflanze.tot);
-    if (pflanzen.length >= 16 && r() < 0.4) {
-      const scheuchen = Object.entries(hof.objekte).filter(([, o]) => o.t === 'vogelscheuche').map(([kk]) => kk.split(',').map(Number));
-      const offen = pflanzen.filter(([kk]) => {
-        const [x, y] = kk.split(',').map(Number);
-        return !scheuchen.some(([sx, sy]) => (sx - x) ** 2 + (sy - y) ** 2 <= 64);
-      });
-      if (offen.length) {
-        const [, f] = waehle(r, offen);
-        bericht.meldungen.push(`Eine Krähe hat in der Nacht eine Pflanze gefressen (${ITEMS[f.pflanze.id].name}). Eine Vogelscheuche hält sie fern.`);
-        f.pflanze = null;
-      }
+  // Regen und Objekte über Nacht
+  for (const [id, w] of Object.entries(s.welt)) {
+    const def = karteHolen(id, s);
+    if (!def) continue;
+    if (regnet(s) && def.aussen) for (const f of Object.values(w.felder)) f.nass = true;
+    const ort = { def, welt: w };
+    for (const [kk, o] of Object.entries(w.objekte)) {
+      const typ = OBJEKT_TYPEN[o.t];
+      if (!typ?.nacht) continue;
+      const [x, y] = ausK(kk);
+      typ.nacht({ s, ort, x, y, kk, o, bericht, r });
     }
   }
 
-  if (regnet(s)) for (const f of Object.values(hof.felder)) f.nass = true;
-  for (const [kk, o] of Object.entries(hof.objekte)) {
-    if (o.t !== 'sprenger' && o.t !== 'qsprenger') continue;
-    const [x, y] = kk.split(',').map(Number);
-    for (let dy = -1; dy <= 1; dy++) {
-      for (let dx = -1; dx <= 1; dx++) {
-        if (!dx && !dy) continue;
-        if (o.t === 'sprenger' && dx && dy) continue;
-        const f = hof.felder[k(x + dx, y + dy)];
-        if (f) f.nass = true;
-      }
-    }
-  }
+  alle('tagEnde', s, bericht, r);
 
-  for (const w of Object.values(s.welt)) {
-    for (const o of Object.values(w.objekte)) if (o.t === 'einmachglas' && o.inhalt && !o.fertig) o.fertig = true;
-  }
-
-  nachwachsen(s, r);
   if (jzWechsel) {
     for (const w of Object.values(s.welt)) {
-      for (const [kk, o] of Object.entries(w.objekte)) if (o.t === 'sammel' && o.wild && !ITEMS[o.id].strand) delete w.objekte[kk];
+      for (const [kk, o] of Object.entries(w.objekte)) if (o.t === 'sammel' && o.wild && ITEMS[o.id]?.saisonal !== false) delete w.objekte[kk];
     }
   }
-  for (const id of ['hof', 'dorf', 'strand']) sammelSpawnen(s, id, r, 2);
-
-  if (s.stall.bauMorgen) {
-    s.stall.gebaut = true;
-    s.stall.bauMorgen = false;
-    bericht.meldungen.push('Bruno hat über Nacht deinen Hühnerstall gebaut! Küken gibt es bei Ottilie.');
-  }
-  if (s.stall.gebaut) eierLegen(s, r, bericht);
+  for (const def of Object.values(KARTEN)) if (def.sammel.length) sammelSpawnen(s, def.id, r, 2);
 
   for (const n of Object.values(s.npcs)) { n.gesprochen = false; n.beschenkt = false; }
-
-  const heute = tagNr(z);
-  if (s.quest && heute > s.quest.frist) {
-    bericht.meldungen.push(`Der Auftrag von ${NPCS[s.quest.npc].name} ist abgelaufen.`);
-    s.quest = null;
-  }
-  if (s.brett && heute > s.brett.bis) s.brett = null;
-  if (!s.brett && !s.quest && r() < 0.6) s.brett = questErzeugen(s, r);
-
-  if (heute >= 4) s.flags.mineOffen = true;
   s.post = postFuerHeute(s);
+  z.glueck = mod('glueck', 0, { s, r });
 
+  werteAktualisieren(s);
   sp.energie = ohnmacht ? Math.round(sp.maxEnergie / 2) : sp.maxEnergie;
   sp.hp = sp.maxHp;
+  const bett = bettPunkt();
   sp.karte = 'haus';
-  sp.x = 3;
-  sp.y = 4;
+  sp.x = bett.x;
+  sp.y = bett.y;
   sp.blick = 'unten';
   sp.tempoBis = 0;
 
   bericht.stufen = s.stufeNeu;
   s.stufeNeu = [];
   s.stats.tage++;
+  alle('morgen', s, bericht);
   return bericht;
 }
 
@@ -981,25 +908,22 @@ export function geburtstagHeute(s, id) {
   const g = NPCS[id].geburtstag;
   return jahreszeit(s) === g.jz && s.zeit.tag === g.tag;
 }
-const ersetze = (s, t) => t.replaceAll('{name}', s.spieler.name).replaceAll('{hof}', s.spieler.hof);
+export const textErsetzen = (s, t) => t.replaceAll('{name}', s.spieler.name).replaceAll('{hof}', s.spieler.hof);
+export const freundschaft = (s, id, punkte) => {
+  const st = s.npcs[id];
+  st.punkte = Math.max(0, Math.min(MAX_PUNKTE, st.punkte + punkte));
+};
 
 export function gespraech(s, id, ort, r = Math.random) {
+  const sonder = erster('gespraech', { s, id, ort, r });
+  if (sonder) return sonder;
   const n = NPCS[id];
   const st = s.npcs[id];
   const erg = { texte: [], items: [] };
   const px = s.spieler.x;
   const py = s.spieler.y;
-
-  if (id === 'lene' && !hat(s, 'angel') && !s.flags.angelBekommen && tagNr(s.zeit) >= 2) {
-    erg.texte.push(ersetze(s, 'Ah, du bist {name}! Hier – die alte Bambusangel meines Großvaters. Hat lange genug in der Ecke gestanden.'));
-    erg.texte.push('Halt die Taste gedrückt zum Auswerfen. Wenn’s zuckt: sofort ziehen! Dann den grünen Balken über dem Fisch halten.');
-    geben(s, ort, px, py, { id: 'angel', n: 1 }, erg);
-    s.flags.angelBekommen = true;
-    if (!st.gesprochen) { st.gesprochen = true; st.punkte = Math.min(MAX_PUNKTE, st.punkte + 20); }
-    return erg;
-  }
   if (st.gesprochen) {
-    erg.texte.push(ersetze(s, waehle(r, n.zeilen.wieder)));
+    erg.texte.push(textErsetzen(s, waehle(r, n.zeilen.wieder)));
     return erg;
   }
   st.gesprochen = true;
@@ -1018,7 +942,7 @@ export function gespraech(s, id, ort, r = Math.random) {
     const liste = n.zeilen.allgemein;
     text = liste[(tagNr(s.zeit) + Object.keys(NPCS).indexOf(id)) % liste.length];
   }
-  erg.texte.push(ersetze(s, text));
+  erg.texte.push(textErsetzen(s, text));
   if (geburtstagHeute(s, id)) erg.texte.push('Heute ist übrigens mein Geburtstag.');
   for (const [lvl, g] of Object.entries(n.herzGeschenk || {})) {
     if (h >= Number(lvl) && !st.herzGeschenke.includes(Number(lvl))) {
@@ -1038,7 +962,7 @@ export function reaktion(id, slot) {
   return 'neutral';
 }
 
-export const verschenkbar = (slot) => !!slot && !['werkzeug'].includes(ITEMS[slot.id].kat);
+export const verschenkbar = (slot) => !!slot && ITEMS[slot.id].kat !== 'werkzeug' && ITEMS[slot.id].verschenkbar !== false;
 
 export function schenken(s, id, idx) {
   const st = s.npcs[id];
@@ -1054,134 +978,157 @@ export function schenken(s, id, idx) {
   entfernenAusSlot(s, idx, 1);
   const gut = art === 'liebt' || art === 'mag' || art === 'neutral';
   const text = gb && gut ? NPCS[id].zeilen.geburtstag : NPCS[id].antwort[art];
-  return { art, text: ersetze(s, text), punkte };
+  return { art, text: textErsetzen(s, text), punkte };
 }
 
-// ─── Aufträge ───────────────────────────────────────────────────────────────
+// ─── Pläne und Wege der Dorfbewohner ────────────────────────────────────────
 
-const AUFTRAG_TEXT = {
-  ernte: ['Ich koche heute für die halbe Straße und mir fehlen {n}× {item}. Wer hilft?', 'Gesucht: {n}× {item}, frisch vom Feld. Gute Bezahlung!'],
-  sammel: ['Für ein altes Familienrezept suche ich {n}× {item}.', 'Wer findet mir {n}× {item}? Ich habe keine Zeit zum Suchen.'],
-  fisch: ['Ich hätte so gern {n}× {item}. Frisch, wenn’s geht!', 'Mein Abendessen schwimmt noch. Bringt mir jemand {n}× {item}?'],
-  erz: ['Für ein kleines Projekt bräuchte ich {n}× {item}.'],
-  mineral: ['Für ein kleines Projekt bräuchte ich {n}× {item}.'],
-  ressource: ['Für ein kleines Projekt bräuchte ich {n}× {item}.'],
-};
-
-export function questErzeugen(s, r = Math.random) {
-  const jz = jahreszeit(s);
-  const kand = [];
-  for (const p of Object.values(PFLANZEN)) if (p.jz.includes(jz)) kand.push(p.ernte);
-  for (const it of Object.values(ITEMS)) {
-    if (it.kat === 'sammel' && !it.strand && it.jz?.includes(jz)) kand.push(it.id);
-    if (it.kat === 'fisch' && it.fisch.jz.includes(jz) && it.fisch.d <= 60) kand.push(it.id);
+/** Plan-Eintrag [zeit, karte, punkt] oder [zeit, karte, x, y] → { karte, x, y }; null = zu Hause. */
+export function planZiel(eintrag) {
+  const [, karte, a, b] = eintrag;
+  if (!karte) return null;
+  if (typeof a === 'string') {
+    const z = zielVon({ karte, punkt: a });
+    return { karte, x: z.x, y: z.y };
   }
-  kand.push('kupfererz', 'quarz', 'kohle');
-  if (s.mine.tiefste >= 10) kand.push('eisenerz');
-  const id = waehle(r, kand);
-  const it = ITEMS[id];
-  const n = it.preis < 50 ? ganz(r, 3, 5) : it.preis < 120 ? ganz(r, 1, 3) : 1;
-  const npc = waehle(r, Object.keys(NPCS));
-  const belohnung = Math.max(100, Math.round((it.preis * n * 3) / 10) * 10);
-  const text = waehle(r, AUFTRAG_TEXT[it.kat] || AUFTRAG_TEXT.ernte).replace('{n}', n).replace('{item}', it.name);
-  return { npc, id, n, belohnung, text, bis: tagNr(s.zeit) + 2 };
+  return { karte, x: a, y: b };
 }
 
-export function questAnnehmen(s) {
-  if (!s.brett) return;
-  s.quest = { ...s.brett, frist: tagNr(s.zeit) + 3 };
-  s.brett = null;
+/** Wo jemand wohnt: heim { karte, punkt } (oder { karte, x, y }). */
+export function npcHeim(id) {
+  const h = NPCS[id].heim;
+  const z = zielVon(h);
+  return { karte: z.karte, x: z.x, y: z.y };
 }
 
-export function questAbgeben(s, npcId) {
-  const q = s.quest;
-  if (!q || q.npc !== npcId || anzahl(s, q.id) < q.n) return null;
-  entfernen(s, q.id, q.n);
-  s.spieler.gold += q.belohnung;
-  s.npcs[npcId].punkte = Math.min(MAX_PUNKTE, s.npcs[npcId].punkte + 150);
-  s.quest = null;
-  s.stats.auftraege++;
-  return { belohnung: q.belohnung, text: 'Danke! Genau das hab ich gebraucht. Hier, für deine Mühe.' };
+/** Der Tagesplan; der Hook `npcPlan` darf ihn ersetzen (Feste, Ehe). */
+export function npcTagesplan(s, id) {
+  const n = NPCS[id];
+  return erster('npcPlan', n, s) ?? ((regnet(s) && n.plan.regen) || n.plan.normal);
 }
 
-// ─── Die Mühle ──────────────────────────────────────────────────────────────
-
-export const buendelEintraege = (b) => b.items.map((e) => (typeof e === 'string' ? { id: e, n: 1 } : e));
-export const buendelNoetig = (b) => b.noetig ?? b.items.length;
-export const buendelFertig = (s, b) => (s.buendel[b.id] || []).length >= buendelNoetig(b);
-
-/** Index des Bündel-Eintrags, den dieser Stapel erfüllen könnte, sonst -1. */
-export function buendelPlatz(s, b, slot) {
-  if (!slot || buendelFertig(s, b)) return -1;
-  const geg = s.buendel[b.id] || [];
-  return buendelEintraege(b).findIndex((e, j) => e.id === slot.id && !geg.includes(j));
-}
-
-export function spenden(s, bId, idx, ort) {
-  const b = BUENDEL.find((x) => x.id === bId);
-  const slot = s.spieler.inv[idx];
-  const i = buendelPlatz(s, b, slot);
-  if (i < 0) return null;
-  const e = buendelEintraege(b)[i];
-  if (anzahl(s, slot.id) < e.n) return { grund: `Dafür brauchst du ${e.n}× ${ITEMS[slot.id].name}.`, items: [] };
-  entfernen(s, slot.id, e.n);
-  (s.buendel[b.id] ??= []).push(i);
-  const erg = { ok: true, items: [] };
-  if (buendelFertig(s, b)) {
-    erg.fertig = b;
-    if (b.belohnung.gold) {
-      s.spieler.gold += b.belohnung.gold;
-      erg.gold = b.belohnung.gold;
-    } else {
-      geben(s, ort, s.spieler.x, s.spieler.y, { id: b.belohnung.id, n: b.belohnung.n }, erg);
+/** Folge von Karten-Übergängen von → nach (Breitensuche über verbindungen()). */
+export function kartenWeg(s, von, nach) {
+  const vorher = { [von]: null };
+  const offen = [von];
+  const v = verbindungen();
+  while (offen.length) {
+    const kk = offen.shift();
+    if (kk === nach) break;
+    for (const l of v) {
+      if (l.von !== kk || l.nach in vorher) continue;
+      if (karteHolen(l.nach, s)?.npcWege === false || !erfuellt(s, l.tuerWenn)) continue;
+      vorher[l.nach] = l;
+      offen.push(l.nach);
     }
   }
-  if (!s.muehle && BUENDEL.every((x) => buendelFertig(s, x))) {
-    s.muehle = true;
-    erg.muehle = true;
-    geben(s, ort, s.spieler.x, s.spieler.y, { id: 'medaille', n: 1 }, erg);
-    for (const n of Object.values(s.npcs)) n.punkte = Math.min(MAX_PUNKTE, n.punkte + 250);
+  if (!(nach in vorher)) return null;
+  const weg = [];
+  for (let kk = nach; vorher[kk]; kk = vorher[kk].von) weg.unshift(vorher[kk]);
+  return weg;
+}
+
+/** Kürzester Weg auf einer Karte (Felder ohne Start, mit Ziel); das Ziel darf blockiert sein. */
+export function feldWeg(s, kartenId, sx, sy, zx, zy) {
+  const def = karteHolen(kartenId, s);
+  const W = def.w;
+  const H = def.h;
+  if (sx < 0 || sy < 0 || sx >= W || sy >= H || zx < 0 || zy < 0 || zx >= W || zy >= H) return null;
+  const frei = begehbarPruefer(s, def, s.welt[kartenId]);
+  const start = sy * W + sx;
+  const ziel = zy * W + zx;
+  const vorher = new Int32Array(W * H).fill(-1);
+  vorher[start] = start;
+  const offen = new Int32Array(W * H);
+  let kopf = 0;
+  let ende = 0;
+  offen[ende++] = start;
+  const SCHRITTE = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+  while (kopf < ende) {
+    const i = offen[kopf++];
+    if (i === ziel) break;
+    const x = i % W;
+    const y = (i - x) / W;
+    for (const [dx, dy] of SCHRITTE) {
+      const nx = x + dx;
+      const ny = y + dy;
+      if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+      const j = ny * W + nx;
+      if (vorher[j] !== -1) continue;
+      if (j !== ziel && !frei(nx, ny)) continue;
+      vorher[j] = i;
+      offen[ende++] = j;
+    }
   }
-  return erg;
+  if (vorher[ziel] === -1) return null;
+  const weg = [];
+  for (let i = ziel; i !== start; i = vorher[i]) weg.push([i % W, Math.floor(i / W)]);
+  return weg.reverse();
+}
+
+/**
+ * Weg von { karte, x, y } nach { karte, x, y }: Schritte { x, y } und Kartenwechsel
+ * { sprung: { karte, x, y } }. `ok` ist false, wenn ein Stück fehlt und gesprungen wird.
+ */
+export function wegPlanen(s, von, ziel) {
+  const schritte = [];
+  let karte = von.karte;
+  let { x, y } = von;
+  const sprung = { sprung: { karte: ziel.karte, x: ziel.x, y: ziel.y } };
+  if (karte !== ziel.karte) {
+    const links = kartenWeg(s, karte, ziel.karte);
+    if (!links) return { schritte: [sprung], ok: false };
+    for (const l of links) {
+      const weg = feldWeg(s, karte, x, y, l.x, l.y);
+      if (!weg) return { schritte: [sprung], ok: false };
+      for (const [fx, fy] of weg) schritte.push({ x: fx, y: fy });
+      schritte.push({ sprung: { karte: l.nach, x: l.zx, y: l.zy } });
+      karte = l.nach;
+      x = l.zx;
+      y = l.zy;
+    }
+  }
+  const weg = feldWeg(s, karte, x, y, ziel.x, ziel.y);
+  if (!weg) return { schritte: [...schritte, sprung], ok: false };
+  for (const [fx, fy] of weg) schritte.push({ x: fx, y: fy });
+  return { schritte, ok: true };
 }
 
 // ─── Basteln und Läden ──────────────────────────────────────────────────────
 
-export const rezeptFrei = (s, r) => !r.stufe || stufe(s, r.stufe[0]) >= r.stufe[1];
+export const rezeptFrei = (s, r) => (r.frei ? !!r.frei(s) : !r.stufe || stufe(s, r.stufe[0]) >= r.stufe[1]);
 export const kannBasteln = (s, r) => rezeptFrei(s, r) && Object.entries(r.zutaten).every(([id, n]) => anzahl(s, id) >= n);
 
 export function basteln(s, rezept) {
   if (!kannBasteln(s, rezept)) return null;
-  const slot = { id: rezept.id, n: rezept.menge || 1 };
+  const slot = { id: rezept.ergebnis ?? rezept.id, n: rezept.menge || 1 };
   if (platzFuer(s, slot) < slot.n) return { grund: 'Kein Platz im Rucksack.' };
   for (const [id, n] of Object.entries(rezept.zutaten)) entfernen(s, id, n);
   hinzufuegen(s, slot);
   return { ok: true, slot };
 }
 
+/** Wo die Theke eines Ladens ist: { karte, x, y }. */
+export function ladenOrt(ladenId) {
+  const z = zielVon(LAEDEN[ladenId].ort);
+  return { karte: z.karte, x: z.x, y: z.y };
+}
+
 export function ladenWare(s, ladenId) {
   const L = LAEDEN[ladenId];
-  const jz = jahreszeit(s);
+  const quelle = typeof L.ware === 'function' ? L.ware(s) : L.ware;
   const liste = [];
-  for (const w of L.ware) {
-    if (w.saatgut) {
-      for (const p of Object.values(PFLANZEN)) if (p.jz.includes(jz)) liste.push({ id: p.saat, preis: ITEMS[p.saat].kauf });
+  for (const w of quelle) {
+    if (w.bedingung && !erfuellt(s, w.bedingung)) continue;
+    if (w.spezial) {
+      const sw = SPEZIAL_WARE[w.spezial];
+      if (!sw) continue;
+      if (sw.angebote) { liste.push(...sw.angebote(s, w)); continue; }
+      if (sw.verfuegbar && !sw.verfuegbar(s, w)) continue;
+      const { id, kaufen: _k, verfuegbar: _v, angebote: _a, ...vorgabe } = sw;
+      liste.push({ ...vorgabe, ...w });
       continue;
     }
-    if (w.spezial === 'upgrade') {
-      for (const wz of AUFRUESTBAR) {
-        const l = s.spieler.werkzeug[wz];
-        if (l >= 3 || !hat(s, wz)) continue;
-        const st = WERKZEUG_STUFEN[l + 1];
-        liste.push({
-          spezial: 'upgrade', werkzeug: wz, stufe: l + 1, name: werkzeugName(wz, l + 1), preis: st.kosten,
-          zutaten: { [st.barren]: 5 }, text: wz === 'giesskanne' ? 'Fasst mehr Wasser. Gedrückt halten gießt mehrere Beete.' : wz === 'hacke' ? 'Gedrückt halten lockert mehrere Felder.' : 'Schlägt kräftiger zu und schafft Härteres.',
-        });
-      }
-      continue;
-    }
-    if (w.bedingung && !bedingung(s, w.bedingung)) continue;
-    if (w.spezial === 'kueken' && s.stall.huehner.length >= 8) continue;
     liste.push({ ...w });
   }
   return liste;
@@ -1194,24 +1141,18 @@ export function kaufen(s, ware, n = 1) {
   for (const [id, m] of Object.entries(ware.zutaten || {})) {
     if (anzahl(s, id) < m * n) return { grund: `Dafür brauchst du ${m * n}× ${ITEMS[id].name}.` };
   }
-  if (ware.id) {
+  let text;
+  if (ware.spezial) {
+    const e = SPEZIAL_WARE[ware.spezial]?.kaufen?.(s, { ware, n });
+    if (e?.grund) return e;
+    text = e?.text;
+  } else if (ware.id) {
     if (platzFuer(s, { id: ware.id, n }) < n) return { grund: 'Kein Platz im Rucksack.' };
     hinzufuegen(s, { id: ware.id, n });
-  } else if (ware.spezial === 'kueken') {
-    const name = HUEHNER_NAMEN[s.stall.huehner.length % HUEHNER_NAMEN.length];
-    s.stall.huehner.push({ name, freundschaft: 0, gestreichelt: false, neu: true });
-  } else if (ware.spezial === 'rucksack') {
-    sp.invGroesse = 36;
-    while (sp.inv.length < 36) sp.inv.push(null);
-  } else if (ware.spezial === 'stall') {
-    s.stall.bauMorgen = true;
-  } else if (ware.spezial === 'upgrade') {
-    sp.werkzeug[ware.werkzeug] = ware.stufe;
-    if (ware.werkzeug === 'giesskanne') sp.wasser = KANNE_INHALT[ware.stufe];
   }
   for (const [id, m] of Object.entries(ware.zutaten || {})) entfernen(s, id, m * n);
   sp.gold -= kosten;
-  return { ok: true };
+  return { ok: true, text };
 }
 
 export function kauftLaden(ladenId, slot) {
@@ -1222,7 +1163,7 @@ export function verkaufen(s, ladenId, idx, n = 1) {
   const slot = s.spieler.inv[idx];
   if (!kauftLaden(ladenId, slot)) return null;
   n = Math.min(n, slot.n);
-  const gold = preisVon(slot) * n;
+  const gold = preisVon(slot, s) * n;
   s.spieler.gold += gold;
   s.stats.verdient += gold;
   entfernenAusSlot(s, idx, n);
@@ -1231,6 +1172,10 @@ export function verkaufen(s, ladenId, idx, n = 1) {
 
 // ─── Angeln ─────────────────────────────────────────────────────────────────
 
+export function muellFuer(art) {
+  return MUELL[art]?.length ? MUELL[art] : Object.values(MUELL).flat();
+}
+
 export function fischWaehlen(s, wasserArt, r = Math.random) {
   const jz = jahreszeit(s);
   const m = s.zeit.minute;
@@ -1238,10 +1183,10 @@ export function fischWaehlen(s, wasserArt, r = Math.random) {
   const wetter = regnet(s) ? 'regen' : 'sonne';
   const pool = FISCHE.filter((f) => {
     const d = f.fisch;
-    return d.o.includes(wasserArt) && d.jz.includes(jz) && uhr >= d.z[0] && uhr < d.z[1] && (!d.w || d.w === wetter);
+    return d.orte.includes(wasserArt) && d.jz.includes(jz) && uhr >= d.zeit[0] && uhr < d.zeit[1] && (!d.wetter || d.wetter === wetter);
   });
-  if (!pool.length || r() < 0.08) return { muell: waehle(r, MUELL[wasserArt]) };
-  const gewicht = pool.map((f) => 110 - f.fisch.d);
+  if (!pool.length || r() < 0.08) return { muell: waehle(r, muellFuer(wasserArt)) };
+  const gewicht = pool.map((f) => 110 - f.fisch.schwierigkeit);
   let z = r() * gewicht.reduce((a, b) => a + b, 0);
   for (let i = 0; i < pool.length; i++) {
     z -= gewicht[i];
@@ -1265,15 +1210,13 @@ export function fangGeben(s, ort, id, perfekt, r = Math.random) {
   let q = z < 0.03 + lvl * 0.03 ? 2 : z < 0.15 + lvl * 0.06 ? 1 : 0;
   if (perfekt && q < 2 && r() < 0.5) q++;
   geben(s, ort, x, y, { id, n: 1, q }, erg);
-  xpGeben(s, 'angeln', ((q + 1) * 3 + it.fisch.d / 3) * (perfekt ? 2 : 1), erg);
+  xpGeben(s, 'angeln', ((q + 1) * 3 + it.fisch.schwierigkeit / 3) * (perfekt ? 2 : 1), erg);
   s.stats.gefangen++;
   erg.q = q;
   return erg;
 }
 
 // ─── Speichern ──────────────────────────────────────────────────────────────
-
-export const SPEICHER_SCHLUESSEL = 'klarwasser-hof-v1';
 
 export function serialisieren(s) {
   return JSON.stringify(s);

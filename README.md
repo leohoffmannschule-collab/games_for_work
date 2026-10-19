@@ -49,9 +49,10 @@ setzen, fertig. Es muss nichts gebaut werden.
 ```
 index.html              Seitengerüst (Kopfzeile, Container)
 assets/
-  app.js                Hub, Router (#/<spiel>), Theme-Umschalter, Spiel-Kontext, App-Kacheln
+  index.css             das Stylesheet von index.html: Design-System und alle Spiel-Styles
+  index.js              das Skript von index.html: Hub, Router (#/<spiel>), Theme, Kacheln
   store.js              localStorage-Wrapper für Bestwerte und Statistik
-  style.css             Design-System und alle Spiel-Styles
+  favicon.svg
   games/
     g2048.js            2048
     minen.js            Minensucher
@@ -61,12 +62,13 @@ assets/
     snake.js            Snake
     dash.js             Dash inkl. Physik, Strecken und Zeichenroutine
 apps/
-  klarwasser-hof/       Kopie des Hofspiels (index.html, src/)
+  klarwasser-hof/       Kopie des Hofspiels (index.html, favicon.svg, src/)
   lorevault/            Kopie von LoreVault; eigene PDFs gehören nach books/
   quellen.json          aus welchem Repo, Branch und Commit die Kopien stammen
 build.mjs               erzeugt dist/index.html für Hosts ohne <head>/<body>
 tools/
   apps-holen.mjs        erneuert die Kopien unter apps/ aus ihren Repos
+  atomar-pruefen.mjs    prüft: nichts inline, je Seite ein Stylesheet und ein Skript
   strecken-pruefen.mjs  prüft die Dash-Strecken auf Lösbarkeit und Fairness
 ```
 
@@ -81,11 +83,34 @@ export function createGame(ctx) { /* … */ }
 `ctx` liefert den Wurzel-Container, den Speicher und Helfer wie `ctx.on(...)` und
 `ctx.interval(...)`, die beim Verlassen des Spiels automatisch aufgeräumt werden.
 Ein neues Spiel hinzufügen heißt also: Modul unter `assets/games/` anlegen und
-einen Eintrag in der `GAMES`-Liste in `assets/app.js` ergänzen.
+einen Eintrag in der `GAMES`-Liste in `assets/index.js` ergänzen.
+
+## Nichts inline
+
+Jede HTML-Seite – der Hub wie die Seiten unter `apps/` – bindet genau ein eigenes
+Stylesheet und ein eigenes Skript ein, die nach ihr heißen: `index.html` →
+`assets/index.css` + `assets/index.js`, `apps/lorevault/reader.html` →
+`CSS/reader.css` + `JS/reader.js` und so fort. Es gibt keine `style`-Attribute,
+keine `<style>`- oder Inline-`<script>`-Blöcke und keine `onclick`-Attribute, auch
+nicht in HTML, das ein Skript erzeugt.
+
+Was sonst noch gebraucht wird, holen diese beiden Dateien selbst: Stylesheets per
+`@import` (Schriften, Icons, gemeinsame Grundlage), Skripte per `import`. Werte, die
+erst zur Laufzeit feststehen – eine Füllhöhe, eine Spaltenzahl, eine Position –,
+setzen die Skripte als Custom Property (`el.style.setProperty('--anteil', 0.4)`),
+und das Stylesheet entscheidet, was daraus wird. Ein- und Ausblenden läuft über das
+`hidden`-Attribut oder Klassen.
+
+```bash
+node tools/atomar-pruefen.mjs
+```
+
+meldet jeden Verstoß mit Datei und Zeile. React kommt im Hub und in den Apps nicht
+vor; nur der Abenteuer-Almanach, der als Link eingebunden ist, ist mit React gebaut.
 
 ## Spiele & Websites
 
-Die größeren Projekte stehen in der `APPS`-Liste in `assets/app.js`. Ein Eintrag mit
+Die größeren Projekte stehen in der `APPS`-Liste in `assets/index.js`. Ein Eintrag mit
 `src` zeigt eine Seite unter `apps/` im Hub an: eine schmale Leiste mit „Übersicht"
 und „Eigener Tab", darunter die App in einem Rahmen über die ganze Fensterbreite.
 Ein Eintrag mit `url` öffnet die Adresse in einem neuen Tab – so beim
@@ -143,7 +168,7 @@ wie eine faire.
 ## Formatierung
 
 ```bash
-npx prettier --write "assets/**/*.js" index.html assets/style.css build.mjs tools/apps-holen.mjs
+npx prettier --write "assets/**/*.js" index.html assets/index.css build.mjs "tools/*.mjs"
 ```
 
 `apps/` bleibt dabei bewusst außen vor – das sind Kopien, formatiert wird im

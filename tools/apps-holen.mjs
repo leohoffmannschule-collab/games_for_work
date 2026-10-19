@@ -26,12 +26,12 @@ const APPS = [
     repo: 'https://github.com/leohoffmannschule-collab/the_price_of_clearwater.git',
     zweig: 'claude/busy-lovelace-s50ri5',
     ordner: '.',
-    nehmen: ['index.html', 'src'],
+    nehmen: ['index.html', 'favicon.svg', 'src'],
   },
   {
     ziel: 'lorevault',
     repo: 'https://github.com/leohoffmannschule-collab/LoreVault.git',
-    zweig: 'main',
+    zweig: 'claude/seiten-atomar',
     ordner: 'LoreVault_testsystem',
     nehmen: [
       'index.html',
@@ -43,9 +43,6 @@ const APPS = [
       'JS',
       'vendor',
     ],
-    // Die Seiten verweisen auf css/ und js/. Unter Windows fällt der
-    // Unterschied nicht auf, auf jedem anderen Server fehlen sonst Stil und Skripte.
-    umbenennen: { CSS: 'css', JS: 'js' },
   },
 ];
 
@@ -74,7 +71,7 @@ for (const app of auswahl) {
 
     for (const name of app.nehmen) {
       const von = join(tmp, app.ordner, name);
-      const nach = join(appsDir, app.ziel, app.umbenennen?.[name] ?? name);
+      const nach = join(appsDir, app.ziel, name);
       if (!existsSync(von)) throw new Error(`${app.ordner}/${name} fehlt im Repository.`);
       rmSync(nach, { recursive: true, force: true });
       cpSync(von, nach, { recursive: true });
