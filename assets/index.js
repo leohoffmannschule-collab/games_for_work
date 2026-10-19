@@ -230,6 +230,14 @@ window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () 
   }
 });
 
+/* ----------------------------------------------------------- Einbettung -- */
+
+// Eine Seite, die den Hub in einem <iframe name="eingebettet"> zeigt (etwa das
+// Trainingslog-Artefakt), bringt ihre eigene Navigation mit. Dann fallen
+// Kopfzeile, Übersicht-Link und Spieltitel weg, und Esc bleibt beim Spiel.
+const eingebettet = window.name === 'eingebettet';
+if (eingebettet) document.documentElement.classList.add('eingebettet');
+
 /* --------------------------------------------------------------- Router -- */
 
 const view = document.getElementById('view');
@@ -320,7 +328,7 @@ function renderHub() {
 async function renderGame(game) {
   document.title = game.title + ' · Pausenspiele';
   view.innerHTML = `
-    <a class="back-link" href="#/">
+    <a class="back-link game-back" href="#/">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
            stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg>
       Übersicht
@@ -385,7 +393,7 @@ window.addEventListener('hashchange', route);
 
 // Esc führt aus jedem Spiel zurück zur Übersicht.
 window.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && location.hash && location.hash !== '#/') {
+  if (e.key === 'Escape' && !eingebettet && location.hash && location.hash !== '#/') {
     location.hash = '#/';
   }
 });

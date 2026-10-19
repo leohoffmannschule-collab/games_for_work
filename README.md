@@ -131,6 +131,11 @@ Danach die Änderungen unter `apps/` einchecken. Welcher Branch geholt wird, ste
 oben im Skript. Ersetzt werden nur die Dateien der App – eigene PDFs unter
 `apps/lorevault/books/` bleiben liegen und werden nicht eingecheckt.
 
+Der Hub lässt sich auch selbst einbetten: Zeigt eine andere Seite ihn in einem
+`<iframe name="eingebettet">`, fallen Kopfzeile, Übersicht-Link und Spieltitel weg,
+und `Esc` bleibt beim Spiel. So nutzt ihn das Trainingslog-Artefakt, das die
+Pausenspiele per `hub/index.html#/2048` usw. öffnet.
+
 Weil die Apps unter derselben Adresse laufen wie der Hub, kann die Kachel ihren
 Spielstand lesen: Klarwasser-Hof zeigt Hof, Jahreszeit und Tag, LoreVault die Zahl
 der Bücher. Der Hub liest dabei nur, er schreibt nie in die Daten der Apps.

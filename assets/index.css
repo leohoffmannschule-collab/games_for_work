@@ -319,6 +319,17 @@ button {
   color: var(--muted);
 }
 
+/* ---------- Eingebettet (siehe index.js) ---------- */
+
+.eingebettet .shell {
+  padding-block: 12px 24px;
+}
+.eingebettet .topbar,
+.eingebettet .game-back,
+.eingebettet .game-head.below-back {
+  display: none;
+}
+
 /* ---------- App-Ansicht (apps/ im Rahmen) ---------- */
 
 body.app-mode {
