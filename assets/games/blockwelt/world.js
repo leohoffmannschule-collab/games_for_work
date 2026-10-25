@@ -2,8 +2,9 @@
  * Die Welt: Chunks, Gelaendeerzeugung, Bloecke lesen/setzen, Strahlentest.
  *
  * Ein Chunk ist 16 x 64 x 16 Bloecke gross und liegt als flaches Uint8Array vor
- * (Index = x + z*16 + y*256). Die Welt ist in x/z unbegrenzt; Chunks werden um den
- * Spieler herum erzeugt und wieder verworfen. Nur Aenderungen des Spielers
+ * (Index = x + z*16 + y*256), dazu ein gleich grosses Array mit Zustandswerten
+ * (Wasserstand, Ausrichtung von Fackel und Ofen). Die Welt ist in x/z unbegrenzt;
+ * Chunks werden um den Spieler herum erzeugt und wieder verworfen. Nur Aenderungen
  * (`edits`) werden gespeichert – alles andere erzeugt der Seed neu.
  */
 
@@ -18,10 +19,21 @@ import {
   LEAVES,
   SNOW,
   BEDROCK,
+  COAL_ORE,
+  IRON_ORE,
+  TALL_GRASS,
+  POPPY,
+  DANDELION,
+  BLOCKS,
   OPAQUE,
   SOLID,
+  LIGHT,
+  WASHABLE,
+  TORCH_WALL,
+  blockBox,
 } from './blocks.js';
-import { Perlin, hash2 } from './noise.js';
+import { Perlin, hash2, mulberry32 } from './noise.js';
+import { waterTick, flowAt, TICK_DELAY, SOURCE } from './fluids.js';
 
 export const CS = 16; // Chunk-Kantenlaenge
 export const CH = 64; // Welthoehe
@@ -29,7 +41,14 @@ export const SEA = 20; // Meeresspiegel (oberster Wasserblock)
 
 const BIOME = { WIESE: 0, WALD: 1, WUESTE: 2, SCHNEE: 3 };
 const TREE_DENSITY = [0.004, 0.032, 0, 0.006];
+const GRASS_DENSITY = [0.12, 0.06, 0, 0.03];
 const PAD = 3; // Rand, in dem Baeume aus Nachbar-Chunks hineinragen koennen
+const H4 = [
+  [1, 0],
+  [-1, 0],
+  [0, 1],
+  [0, -1],
+];
 
 const smooth = (a, b, x) => {
   const t = Math.max(0, Math.min(1, (x - a) / (b - a)));
@@ -37,14 +56,59 @@ const smooth = (a, b, x) => {
 };
 
 export const chunkKey = (cx, cz) => (cx + 32768) * 65536 + (cz + 32768);
+const posKey = (x, y, z) => ((x + 1048576) * 2097152 + (z + 1048576)) * 64 + y;
+
+/**
+ * Schnittpunkt eines Strahls mit einem Quader (Slab-Verfahren).
+ * Liefert { t, n } (Abstand, Flaechennormale) oder null.
+ */
+export function rayBox(ox, oy, oz, dx, dy, dz, x0, y0, z0, x1, y1, z1) {
+  const o = [ox, oy, oz];
+  const d = [dx, dy, dz];
+  const lo = [x0, y0, z0];
+  const hi = [x1, y1, z1];
+  let tmin = -Infinity;
+  let tmax = Infinity;
+  let axis = -1;
+  let sign = 0;
+  for (let a = 0; a < 3; a++) {
+    if (Math.abs(d[a]) < 1e-12) {
+      if (o[a] < lo[a] || o[a] > hi[a]) return null;
+      continue;
+    }
+    let t1 = (lo[a] - o[a]) / d[a];
+    let t2 = (hi[a] - o[a]) / d[a];
+    let s = -1;
+    if (t1 > t2) {
+      [t1, t2] = [t2, t1];
+      s = 1;
+    }
+    if (t1 > tmin) {
+      tmin = t1;
+      axis = a;
+      sign = s;
+    }
+    if (t2 < tmax) tmax = t2;
+    if (tmin > tmax) return null;
+  }
+  if (tmax < 0) return null;
+  const n = [0, 0, 0];
+  if (axis >= 0 && tmin >= 0) n[axis] = sign;
+  return { t: Math.max(0, tmin), n };
+}
 
 export class Chunk {
   constructor(cx, cz) {
     this.cx = cx;
     this.cz = cz;
     this.blocks = new Uint8Array(CS * CS * CH);
+    this.meta = new Uint8Array(CS * CS * CH);
     /** Hoehe des obersten lichtundurchlaessigen Blocks je Spalte (-1 = keiner). */
     this.top = new Int16Array(CS * CS).fill(-1);
+    /** Lokale Indizes aller leuchtenden Bloecke. */
+    this.emitters = new Set();
+    /** Licht je Zelle (Himmel << 4 | Block), berechnet beim Vernetzen. */
+    this.light = null;
     this.ready = false;
     this.dirty = true;
     this.mesh = null;
@@ -55,9 +119,14 @@ export class World {
   constructor(seed, edits = null) {
     this.seed = seed | 0;
     this.chunks = new Map();
-    /** chunkKey -> Map(lokaler Index -> Block-ID), alles was der Spieler veraendert hat. */
+    /** chunkKey -> Map(lokaler Index -> Block | Zustand << 8): alles, was sich geaendert hat. */
     this.edits = edits || new Map();
     this.onChunkRemoved = null;
+    /** Ereignisse fuer das Spiel, z. B. weggespuelte Fackeln ({ type: 'drop', id, x, y, z }). */
+    this.events = [];
+    this.tickCount = 0;
+    this.fluidQueue = new Map();
+    this.depth = 0;
 
     const s = this.seed;
     this.nBase = new Perlin(s ^ 0x1a2b3c);
@@ -127,12 +196,13 @@ export class World {
     for (let dz = 0; dz < W; dz++) {
       for (let dx = 0; dx < W; dx++) cols[dx + dz * W] = this.column(x0 + dx - PAD, z0 + dz - PAD);
     }
+    const colAt = (lx, lz) => cols[lx + PAD + (lz + PAD) * W];
 
     for (let lz = 0; lz < CS; lz++) {
       for (let lx = 0; lx < CS; lx++) {
         const wx = x0 + lx;
         const wz = z0 + lz;
-        const { h, biome } = cols[lx + PAD + (lz + PAD) * W];
+        const { h, biome } = colAt(lx, lz);
         const beach = h <= SEA + 1;
         const desert = biome === BIOME.WUESTE;
         const snowy = biome === BIOME.SCHNEE;
@@ -159,10 +229,12 @@ export class World {
       }
     }
 
+    this.placeOres(chunk, x0, z0);
+
     // Baeume: auch die aus Nachbar-Chunks, soweit sie hereinragen.
     for (let tx = x0 - 2; tx < x0 + CS + 2; tx++) {
       for (let tz = z0 - 2; tz < z0 + CS + 2; tz++) {
-        const { h, biome } = cols[tx - x0 + PAD + (tz - z0 + PAD) * W];
+        const { h, biome } = colAt(tx - x0, tz - z0);
         if (h <= SEA + 1 || biome === BIOME.WUESTE || (biome === BIOME.SCHNEE && h >= 40)) continue;
         if (hash2(tx, tz, this.seed ^ 0x7777) >= TREE_DENSITY[biome]) continue;
         const height = 4 + Math.floor(hash2(tx, tz, this.seed ^ 0x1234) * 3);
@@ -170,15 +242,70 @@ export class World {
       }
     }
 
+    // Hohes Gras und Blumen auf freien Grasflaechen.
+    for (let lz = 0; lz < CS; lz++) {
+      for (let lx = 0; lx < CS; lx++) {
+        const { h, biome } = colAt(lx, lz);
+        const i = lx + lz * CS + h * 256;
+        if (h >= CH - 1 || blocks[i] !== GRASS || blocks[i + 256] !== AIR) continue;
+        const r = hash2(x0 + lx, z0 + lz, this.seed ^ 0x9e37);
+        if (r < 0.012) {
+          blocks[i + 256] = hash2(x0 + lx, z0 + lz, this.seed ^ 0x51) < 0.5 ? POPPY : DANDELION;
+        } else if (r < 0.012 + GRASS_DENSITY[biome]) {
+          blocks[i + 256] = TALL_GRASS;
+        }
+      }
+    }
+
     // Aenderungen des Spielers einarbeiten.
     const edits = this.edits.get(key);
-    if (edits) for (const [idx, id] of edits) blocks[idx] = id;
+    if (edits) {
+      for (const [idx, v] of edits) {
+        blocks[idx] = v & 255;
+        chunk.meta[idx] = v >> 8;
+        if (LIGHT[v & 255]) chunk.emitters.add(idx);
+      }
+    }
 
     for (let i = 0; i < CS * CS; i++) this.recomputeTop(chunk, i);
     chunk.ready = true;
     chunk.dirty = true;
     this.chunks.set(key, chunk);
     return chunk;
+  }
+
+  /**
+   * Erzadern als kurze Zufallswege durch den Stein. Jede Ader gehoert zu einem
+   * Ursprungs-Chunk und wird von dessen Nachbarn genauso berechnet – so passen die
+   * Chunks nahtlos aneinander.
+   */
+  placeOres(chunk, x0, z0) {
+    for (let ocx = chunk.cx - 1; ocx <= chunk.cx + 1; ocx++) {
+      for (let ocz = chunk.cz - 1; ocz <= chunk.cz + 1; ocz++) {
+        const rnd = mulberry32((hash2(ocx, ocz, this.seed ^ 0x5eed) * 4294967296) | 0);
+        for (let i = 0; i < 14; i++) this.vein(chunk, x0, z0, rnd, ocx, ocz, COAL_ORE, 5, 52, 12);
+        for (let i = 0; i < 7; i++) this.vein(chunk, x0, z0, rnd, ocx, ocz, IRON_ORE, 3, 34, 7);
+      }
+    }
+  }
+
+  vein(chunk, x0, z0, rnd, ocx, ocz, ore, yMin, yMax, size) {
+    let x = ocx * CS + rnd() * CS;
+    let y = yMin + rnd() * (yMax - yMin);
+    let z = ocz * CS + rnd() * CS;
+    for (let k = 0; k < size; k++) {
+      const lx = Math.floor(x) - x0;
+      const ly = Math.floor(y);
+      const lz = Math.floor(z) - z0;
+      if (lx >= 0 && lx < CS && lz >= 0 && lz < CS && ly > 0 && ly < CH) {
+        const i = lx + lz * CS + ly * 256;
+        if (chunk.blocks[i] === STONE) chunk.blocks[i] = ore;
+      }
+      const a = rnd() * Math.PI * 2;
+      x += Math.cos(a) * 0.9;
+      z += Math.sin(a) * 0.9;
+      y += (rnd() * 2 - 1) * 0.6;
+    }
   }
 
   growTree(chunk, x0, z0, tx, tz, y0, height) {
@@ -230,6 +357,12 @@ export class World {
     return c.blocks[(x & 15) + (z & 15) * CS + y * 256];
   }
 
+  getMeta(x, y, z) {
+    if (y < 0 || y >= CH) return 0;
+    const c = this.chunks.get(chunkKey(x >> 4, z >> 4));
+    return c ? c.meta[(x & 15) + (z & 15) * CS + y * 256] : 0;
+  }
+
   isLoaded(x, z) {
     return this.chunks.has(chunkKey(x >> 4, z >> 4));
   }
@@ -247,16 +380,37 @@ export class World {
     return this.getBlock(x, y, z) === WATER;
   }
 
+  flowAt(x, y, z) {
+    return flowAt(this, x, y, z);
+  }
+
   /** Oberster fester Block einer Spalte (zum Aufsetzen nach dem Laden). */
   surfaceY(x, z) {
     for (let y = CH - 1; y >= 0; y--) if (this.solidAt(x, y, z)) return y;
     return 0;
   }
 
+  /** Sieht diese Zelle den Himmel (nichts Lichtundurchlaessiges darueber)? */
+  canSeeSky(x, y, z) {
+    const c = this.chunks.get(chunkKey(x >> 4, z >> 4));
+    return !c || y > c.top[(x & 15) + (z & 15) * CS];
+  }
+
+  /** Licht in einer Zelle (je 0..15). Ohne berechnetes Licht nur grob geschaetzt. */
+  lightAt(x, y, z) {
+    if (y >= CH) return { sky: 15, block: 0 };
+    if (y < 0) return { sky: 0, block: 0 };
+    const c = this.chunks.get(chunkKey(x >> 4, z >> 4));
+    if (!c) return { sky: 15, block: 0 };
+    const i = (x & 15) + (z & 15) * CS + y * 256;
+    if (c.light) return { sky: c.light[i] >> 4, block: c.light[i] & 15 };
+    return { sky: y > c.top[(x & 15) + (z & 15) * CS] ? 15 : 0, block: 0 };
+  }
+
   /* --------------------------------------------------- Bloecke setzen -- */
 
-  /** Setzt einen Block und merkt die Aenderung fuer den Spielstand. */
-  setBlock(x, y, z, id) {
+  /** Setzt einen Block samt Zustand, merkt die Aenderung und loest Folgen aus. */
+  setBlock(x, y, z, id, meta = 0) {
     if (y < 1 || y >= CH) return false; // Grundgestein bleibt, oben ist Luft
     const cx = x >> 4;
     const cz = z >> 4;
@@ -265,39 +419,125 @@ export class World {
     const lx = x & 15;
     const lz = z & 15;
     const idx = lx + lz * CS + y * 256;
-    if (c.blocks[idx] === id) return false;
+    const old = c.blocks[idx];
+    if (old === id && c.meta[idx] === meta) return false;
     c.blocks[idx] = id;
+    c.meta[idx] = meta;
 
     const key = chunkKey(cx, cz);
     let e = this.edits.get(key);
     if (!e) this.edits.set(key, (e = new Map()));
-    e.set(idx, id);
+    e.set(idx, id | (meta << 8));
 
-    this.recomputeTop(c, lx + lz * CS);
-    this.markDirty(c, lx, lz);
+    if (LIGHT[old]) c.emitters.delete(idx);
+    if (LIGHT[id]) c.emitters.add(idx);
+    const lightChanged = OPAQUE[old] !== OPAQUE[id] || LIGHT[old] !== LIGHT[id];
+    if (OPAQUE[old] !== OPAQUE[id]) this.recomputeTop(c, lx + lz * CS);
+    this.markDirty(c, lx, lz, lightChanged);
+    this.changed(x, y, z);
     return true;
   }
 
-  markDirty(c, lx, lz) {
+  /**
+   * Chunk neu vernetzen lassen. Aendert sich Licht, koennen auch Nachbarn betroffen
+   * sein (Licht reicht 15 Bloecke weit), sonst nur an der Kante wegen der Schatten.
+   */
+  markDirty(c, lx, lz, light) {
     c.dirty = true;
-    const dxs = lx === 0 ? [-1, 0] : lx === CS - 1 ? [0, 1] : [0];
-    const dzs = lz === 0 ? [-1, 0] : lz === CS - 1 ? [0, 1] : [0];
-    for (const dx of dxs) {
-      for (const dz of dzs) {
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dz = -1; dz <= 1; dz++) {
         if (!dx && !dz) continue;
+        const edge =
+          (dx === 0 || (dx < 0 ? lx === 0 : lx === CS - 1)) &&
+          (dz === 0 || (dz < 0 ? lz === 0 : lz === CS - 1));
+        if (!light && !edge) continue;
         const n = this.getChunk(c.cx + dx, c.cz + dz);
         if (n) n.dirty = true;
       }
     }
   }
 
+  /** Folgen einer Aenderung: Wasser rechnet neu, haltlose Bloecke fallen ab, Sand faellt. */
+  changed(x, y, z) {
+    this.wakeWater(x, y, z);
+    this.wakeWater(x, y + 1, z);
+    this.wakeWater(x, y - 1, z);
+    for (const [dx, dz] of H4) this.wakeWater(x + dx, y, z + dz);
+    if (this.depth > 80) return; // Sicherung gegen sehr lange Kettenreaktionen
+    this.depth++;
+    this.checkSupport(x, y + 1, z);
+    for (const [dx, dz] of H4) this.checkSupport(x + dx, y, z + dz);
+    this.checkFall(x, y, z);
+    this.checkFall(x, y + 1, z);
+    this.depth--;
+  }
+
+  wakeWater(x, y, z) {
+    if (this.getBlock(x, y, z) === WATER) this.scheduleFluid(x, y, z);
+  }
+
+  /** Haelt der Block noch? Pflanzen brauchen Erde, Fackeln einen festen Block. */
+  hasSupport(x, y, z, id, meta) {
+    const def = BLOCKS[id];
+    if (!def || !def.support) return true;
+    if (def.support === 'ground') {
+      const below = this.getBlock(x, y - 1, z);
+      return below === GRASS || below === DIRT;
+    }
+    const wall = TORCH_WALL[meta];
+    return wall
+      ? SOLID[this.getBlock(x + wall[0], y, z + wall[2])] === 1
+      : SOLID[this.getBlock(x, y - 1, z)] === 1;
+  }
+
+  checkSupport(x, y, z) {
+    const id = this.getBlock(x, y, z);
+    if (!BLOCKS[id] || !BLOCKS[id].support) return;
+    if (this.hasSupport(x, y, z, id, this.getMeta(x, y, z))) return;
+    this.setBlock(x, y, z, AIR);
+    this.events.push({ type: 'drop', id, x, y, z });
+  }
+
+  checkFall(x, y, z) {
+    const id = this.getBlock(x, y, z);
+    if (!BLOCKS[id] || !BLOCKS[id].gravity) return;
+    const fallsInto = (b) => b === AIR || b === WATER || WASHABLE[b] === 1;
+    let ty = y;
+    while (ty > 1 && fallsInto(this.getBlock(x, ty - 1, z))) ty--;
+    if (ty === y) return;
+    const meta = this.getMeta(x, y, z);
+    // Erst ankommen, dann loslassen – sonst landet der naechste Sand am selben Fleck.
+    this.setBlock(x, ty, z, id, meta);
+    this.setBlock(x, y, z, AIR);
+  }
+
+  /* ------------------------------------------------------------ Wasser -- */
+
+  scheduleFluid(x, y, z, delay = TICK_DELAY) {
+    const k = posKey(x, y, z);
+    if (!this.fluidQueue.has(k)) this.fluidQueue.set(k, { x, y, z, due: this.tickCount + delay });
+  }
+
+  /** Ein Welttick: geplante Wasser-Updates abarbeiten (mit Obergrenze pro Tick). */
+  tick(budget = 400) {
+    this.tickCount++;
+    let n = 0;
+    for (const [k, e] of this.fluidQueue) {
+      if (e.due > this.tickCount) break; // gleiche Verzoegerung -> Einfuegereihenfolge = Faelligkeit
+      this.fluidQueue.delete(k);
+      waterTick(this, e.x, e.y, e.z);
+      if (++n >= budget) break;
+    }
+  }
+
   /* ------------------------------------------------------- Strahlentest -- */
 
   /**
-   * Gitter-Durchlauf (Amanatides & Woo): liefert den ersten Block, der kein Wasser
-   * oder Luft ist, samt Flaechennormale. Richtung muss normiert sein.
+   * Gitter-Durchlauf (Amanatides & Woo): liefert den ersten Block samt Flaechennormale.
+   * Kleine Bloecke (Fackeln, Pflanzen) werden mit ihrer echten Form getroffen. Mit
+   * `fluids` zaehlen auch Wasserquellen als Treffer (fuer den Eimer).
    */
-  raycast(ox, oy, oz, dx, dy, dz, maxDist) {
+  raycast(ox, oy, oz, dx, dy, dz, maxDist, fluids = false) {
     let x = Math.floor(ox);
     let y = Math.floor(oy);
     let z = Math.floor(oz);
@@ -317,7 +557,32 @@ export class World {
 
     while (t <= maxDist) {
       const id = this.getBlock(x, y, z);
-      if (id !== AIR && id !== WATER) return { x, y, z, nx, ny, nz, id, dist: t };
+      if (id === WATER) {
+        if (fluids && this.getMeta(x, y, z) === SOURCE) {
+          return { x, y, z, nx, ny, nz, id, meta: 0, dist: t, box: null };
+        }
+      } else if (id !== AIR) {
+        const meta = this.getMeta(x, y, z);
+        const box = blockBox(id, meta);
+        if (!box) return { x, y, z, nx, ny, nz, id, meta, dist: t, box: null };
+        const r = rayBox(
+          ox,
+          oy,
+          oz,
+          dx,
+          dy,
+          dz,
+          x + box[0],
+          y + box[1],
+          z + box[2],
+          x + box[3],
+          y + box[4],
+          z + box[5],
+        );
+        if (r && r.t <= maxDist) {
+          return { x, y, z, nx: r.n[0], ny: r.n[1], nz: r.n[2], id, meta, dist: r.t, box };
+        }
+      }
       if (tx < ty && tx < tz) {
         x += sx;
         t = tx;
@@ -341,6 +606,27 @@ export class World {
     return null;
   }
 
+  /** Freie Sicht zwischen zwei Punkten (nur lichtundurchlaessige Bloecke stoeren). */
+  canSee(ax, ay, az, bx, by, bz) {
+    const dx = bx - ax;
+    const dy = by - ay;
+    const dz = bz - az;
+    const len = Math.hypot(dx, dy, dz);
+    if (len < 1e-6) return true;
+    const steps = Math.ceil(len * 2);
+    for (let i = 1; i < steps; i++) {
+      const f = i / steps;
+      if (
+        OPAQUE[
+          this.getBlock(Math.floor(ax + dx * f), Math.floor(ay + dy * f), Math.floor(az + dz * f))
+        ]
+      ) {
+        return false;
+      }
+    }
+    return true;
+  }
+
   /* --------------------------------------------------------- Speichern -- */
 
   serializeEdits() {
@@ -350,7 +636,7 @@ export class World {
       const cx = Math.floor(key / 65536) - 32768;
       const cz = (key % 65536) - 32768;
       const flat = [];
-      for (const [idx, id] of map) flat.push(idx, id);
+      for (const [idx, v] of map) flat.push(idx, v);
       out.push([cx, cz, flat]);
     }
     return out;

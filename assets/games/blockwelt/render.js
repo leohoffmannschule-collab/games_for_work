@@ -7,7 +7,9 @@
 
 import { CS, CH } from './world.js';
 import { FLOATS, meshChunk } from './mesher.js';
-import { buildAtlas } from './atlas.js';
+import { buildAtlas, buildEntityAtlas } from './atlas.js';
+import { ATLAS_COLS, tile as tileIndex } from './blocks.js';
+import { ENTITY_FLOATS } from './models.js';
 
 /* ------------------------------------------------------------- Matrizen -- */
 
@@ -102,35 +104,70 @@ function boxVisible(planes, min, max) {
 /* -------------------------------------------------------------- Shader -- */
 
 const TERRAIN_VS = `#version 300 es
-in vec3 a_pos; in vec2 a_uv; in vec2 a_light;
+in vec3 a_pos; in vec2 a_uv; in vec3 a_light;
 uniform mat4 u_vp; uniform vec3 u_off;
-out vec2 v_uv; out vec2 v_light; out float v_dist;
+out vec2 v_uv; out vec3 v_light; out float v_dist;
 void main() {
   vec3 p = a_pos + u_off;
   gl_Position = u_vp * vec4(p, 1.0);
   v_uv = a_uv; v_light = a_light; v_dist = length(p);
 }`;
 
+/**
+ * Lichtkurve des Vorbilds: Stufe f (0..1) -> f / (4 - 3f). Himmels- und Blocklicht
+ * werden addiert, dann aufgehellt (Einstellung "hell") und minimal angehoben.
+ */
+const LIGHT_GLSL = `
+float lc(float f) { return f / (4.0 - 3.0 * f); }
+vec3 lightmap(float sky, float block) {
+  vec3 l = lc(sky * u_skyLevel) * u_skyTint + lc(block) * vec3(1.0, 0.86, 0.66);
+  l = clamp(l, 0.0, 1.0);
+  vec3 inv = 1.0 - l;
+  l = mix(l, 1.0 - inv * inv * inv * inv, u_gamma);
+  return mix(l, vec3(0.75), 0.04);
+}`;
+
 const TERRAIN_FS = `#version 300 es
 precision highp float;
-in vec2 v_uv; in vec2 v_light; in float v_dist;
+in vec2 v_uv; in vec3 v_light; in float v_dist;
 uniform sampler2D u_tex;
-uniform float u_day; uniform vec3 u_fog; uniform vec2 u_fogRange;
+uniform float u_skyLevel; uniform vec3 u_skyTint; uniform float u_gamma;
+uniform vec3 u_fog; uniform vec2 u_fogRange;
 out vec4 o;
+${LIGHT_GLSL}
 void main() {
   vec4 t = texture(u_tex, v_uv);
   if (t.a < 0.05) discard;
-  float lit = v_light.y > 1.5 ? 1.0 : mix(0.16, 1.0, v_light.y * u_day);
-  vec3 tint = mix(vec3(0.55, 0.65, 1.0), vec3(1.0), u_day);
-  vec3 c = t.rgb * v_light.x * lit * (v_light.y > 1.5 ? vec3(1.0) : tint);
+  vec3 c = t.rgb * v_light.x * lightmap(v_light.y, v_light.z);
   float f = clamp((v_dist - u_fogRange.x) / (u_fogRange.y - u_fogRange.x), 0.0, 1.0);
   o = vec4(mix(c, u_fog, f), t.a);
 }`;
 
+const ENTITY_VS = `#version 300 es
+in vec3 a_pos; in vec2 a_uv; in vec3 a_col;
+uniform mat4 u_vp;
+out vec2 v_uv; out vec3 v_col; out float v_dist;
+void main() {
+  gl_Position = u_vp * vec4(a_pos, 1.0);
+  v_uv = a_uv; v_col = a_col; v_dist = length(a_pos);
+}`;
+
+const ENTITY_FS = `#version 300 es
+precision highp float;
+in vec2 v_uv; in vec3 v_col; in float v_dist;
+uniform sampler2D u_tex; uniform vec3 u_fog; uniform vec2 u_fogRange;
+out vec4 o;
+void main() {
+  vec4 t = texture(u_tex, v_uv);
+  if (t.a < 0.1) discard;
+  float f = clamp((v_dist - u_fogRange.x) / (u_fogRange.y - u_fogRange.x), 0.0, 1.0);
+  o = vec4(mix(t.rgb * v_col, u_fog, f), 1.0);
+}`;
+
 const FLAT_VS = `#version 300 es
 in vec3 a_pos;
-uniform mat4 u_vp; uniform vec3 u_off; uniform float u_size;
-void main() { gl_Position = u_vp * vec4(a_pos + u_off, 1.0); gl_PointSize = u_size; }`;
+uniform mat4 u_vp; uniform vec3 u_off; uniform vec3 u_scale; uniform float u_size;
+void main() { gl_Position = u_vp * vec4(a_pos * u_scale + u_off, 1.0); gl_PointSize = u_size; }`;
 
 const FLAT_FS = `#version 300 es
 precision mediump float;
@@ -191,12 +228,32 @@ export function skyState(time) {
   const l = Math.hypot(...dir);
   return {
     angle: a,
-    day: 0.14 + 0.86 * day,
+    day,
+    // Himmelslicht nachts auf Stufe 4 von 15 wie im Vorbild, leicht blaeulich.
+    skyLevel: (4 + 11 * day) / 15,
+    skyTint: [0, 1, 2].map((i) => lerp([0.68, 0.74, 1][i], 1, day)),
     nightness: 1 - day,
     color: col,
     sun: dir.map((v) => v / l),
   };
 }
+
+const lc = (f) => f / (4 - 3 * f);
+
+/** Dieselbe Lichtkurve wie im Shader, fuer Wesen (pro Wesen ein Farbwert). */
+export function lightColor(sky, block, state, gamma = GAMMA) {
+  const s = lc((sky / 15) * state.skyLevel);
+  const b = lc(block / 15);
+  const torch = [1, 0.86, 0.66];
+  return [0, 1, 2].map((i) => {
+    let l = Math.min(1, s * state.skyTint[i] + b * torch[i]);
+    l = l + (1 - Math.pow(1 - l, 4) - l) * gamma;
+    return l * 0.96 + 0.75 * 0.04;
+  });
+}
+
+/** Helligkeit wie die Standardeinstellung des Vorbilds (0 = duester, 1 = hell). */
+export const GAMMA = 0.5;
 
 function makeSunTexture(gl, kind) {
   const c = document.createElement('canvas');
@@ -240,6 +297,7 @@ export function createRenderer(canvas) {
   const terrain = program(gl, TERRAIN_VS, TERRAIN_FS);
   const flat = program(gl, FLAT_VS, FLAT_FS);
   const skyProg = program(gl, SKY_VS, SKY_FS);
+  const entity = program(gl, ENTITY_VS, ENTITY_FS);
 
   // Atlas.
   const atlasTex = gl.createTexture();
@@ -252,6 +310,14 @@ export function createRenderer(canvas) {
   const sunTex = makeSunTexture(gl, 'sun');
   const moonTex = makeSunTexture(gl, 'moon');
 
+  const entityTex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, entityTex);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, buildEntityAtlas());
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+
   // Terrain-VAOs werden pro Chunk angelegt.
   const terrainLoc = {
     pos: gl.getAttribLocation(terrain.p, 'a_pos'),
@@ -259,23 +325,54 @@ export function createRenderer(canvas) {
     light: gl.getAttribLocation(terrain.p, 'a_light'),
   };
 
-  function uploadMesh(data) {
-    if (!data.length) return null;
+  function terrainVao(buf) {
     const vao = gl.createVertexArray();
-    const buf = gl.createBuffer();
     gl.bindVertexArray(vao);
     gl.bindBuffer(gl.ARRAY_BUFFER, buf);
-    gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
     const stride = FLOATS * 4;
     gl.enableVertexAttribArray(terrainLoc.pos);
     gl.vertexAttribPointer(terrainLoc.pos, 3, gl.FLOAT, false, stride, 0);
     gl.enableVertexAttribArray(terrainLoc.uv);
     gl.vertexAttribPointer(terrainLoc.uv, 2, gl.FLOAT, false, stride, 12);
     gl.enableVertexAttribArray(terrainLoc.light);
-    gl.vertexAttribPointer(terrainLoc.light, 2, gl.FLOAT, false, stride, 20);
+    gl.vertexAttribPointer(terrainLoc.light, 3, gl.FLOAT, false, stride, 20);
     gl.bindVertexArray(null);
-    return { vao, buf, count: data.length / FLOATS };
+    return vao;
   }
+
+  function uploadMesh(data) {
+    if (!data.length) return null;
+    const buf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
+    return { vao: terrainVao(buf), buf, count: data.length / FLOATS };
+  }
+
+  // Risse am Block, der gerade abgebaut wird (Gelaende-Shader mit Atlas).
+  const crackBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, crackBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, 36 * FLOATS * 4, gl.DYNAMIC_DRAW);
+  const crackVao = terrainVao(crackBuf);
+
+  // Wesen: ein dynamischer Puffer fuer alle.
+  const entityBuf = gl.createBuffer();
+  const entityVao = gl.createVertexArray();
+  {
+    gl.bindVertexArray(entityVao);
+    gl.bindBuffer(gl.ARRAY_BUFFER, entityBuf);
+    const stride = ENTITY_FLOATS * 4;
+    const pos = gl.getAttribLocation(entity.p, 'a_pos');
+    const uv = gl.getAttribLocation(entity.p, 'a_uv');
+    const col = gl.getAttribLocation(entity.p, 'a_col');
+    gl.enableVertexAttribArray(pos);
+    gl.vertexAttribPointer(pos, 3, gl.FLOAT, false, stride, 0);
+    gl.enableVertexAttribArray(uv);
+    gl.vertexAttribPointer(uv, 2, gl.FLOAT, false, stride, 12);
+    gl.enableVertexAttribArray(col);
+    gl.vertexAttribPointer(col, 3, gl.FLOAT, false, stride, 20);
+    gl.bindVertexArray(null);
+  }
+  let entityCap = 0;
 
   function freeMesh(m) {
     if (!m) return;
@@ -302,15 +399,9 @@ export function createRenderer(canvas) {
 
   const E = 0.003;
   const cubeLines = [];
-  const cubeTris = [];
   {
     const c = [];
-    for (let i = 0; i < 8; i++)
-      c.push([
-        (i & 1) * (1 + 2 * E) - E,
-        ((i >> 1) & 1) * (1 + 2 * E) - E,
-        ((i >> 2) & 1) * (1 + 2 * E) - E,
-      ]);
+    for (let i = 0; i < 8; i++) c.push([i & 1, (i >> 1) & 1, (i >> 2) & 1]);
     for (const [a, b] of [
       [0, 1],
       [2, 3],
@@ -326,19 +417,70 @@ export function createRenderer(canvas) {
       [3, 7],
     ])
       cubeLines.push(...c[a], ...c[b]);
-    for (const q of [
-      [0, 1, 3, 2],
-      [4, 6, 7, 5],
-      [0, 4, 5, 1],
-      [2, 3, 7, 6],
-      [0, 2, 6, 4],
-      [1, 5, 7, 3],
-    ]) {
-      for (const i of [0, 1, 2, 0, 2, 3]) cubeTris.push(...c[q[i]]);
-    }
   }
   const linesBuf = makeFlat(new Float32Array(cubeLines));
-  const trisBuf = makeFlat(new Float32Array(cubeTris));
+
+  /** Sechs Flaechen eines Quaders mit einer Riss-Kachel (Vertexformat des Gelaendes). */
+  function crackMesh(box, stage) {
+    const t = tileIndex('destroy_' + stage);
+    const span = 1 / ATLAS_COLS;
+    const tu = (t % ATLAS_COLS) * span;
+    const tv = Math.floor(t / ATLAS_COLS) * span;
+    const [x0, y0, z0, x1, y1, z1] = box;
+    const q = [
+      [
+        [x1, y0, z1],
+        [x1, y0, z0],
+        [x1, y1, z0],
+        [x1, y1, z1],
+      ],
+      [
+        [x0, y0, z0],
+        [x0, y0, z1],
+        [x0, y1, z1],
+        [x0, y1, z0],
+      ],
+      [
+        [x0, y1, z1],
+        [x1, y1, z1],
+        [x1, y1, z0],
+        [x0, y1, z0],
+      ],
+      [
+        [x0, y0, z0],
+        [x1, y0, z0],
+        [x1, y0, z1],
+        [x0, y0, z1],
+      ],
+      [
+        [x0, y0, z1],
+        [x1, y0, z1],
+        [x1, y1, z1],
+        [x0, y1, z1],
+      ],
+      [
+        [x1, y0, z0],
+        [x0, y0, z0],
+        [x0, y1, z0],
+        [x1, y1, z0],
+      ],
+    ];
+    const uv = [
+      [0, 1],
+      [1, 1],
+      [1, 0],
+      [0, 0],
+    ];
+    const out = new Float32Array(36 * FLOATS);
+    let n = 0;
+    for (const face of q) {
+      for (const k of [0, 1, 2, 0, 2, 3]) {
+        out.set([...face[k], tu + uv[k][0] * span * 0.99, tv + uv[k][1] * span * 0.99, 1, 1, 1], n);
+        n += FLOATS;
+      }
+    }
+    return out;
+  }
 
   // Sterne: gleichmaessig auf der Kugel verteilt.
   const starData = [];
@@ -463,7 +605,10 @@ export function createRenderer(canvas) {
     /**
      * Zeichnet ein Bild.
      * @param view {x,y,z,yaw,pitch,fov}  Kameraposition (Auge) und Blick
-     * @param opts {sky, renderDistance, underwater, target, breakProgress}
+     * @param opts {sky, renderDistance, underwater, target, breakStage, entities}
+     *   target: { x, y, z, box }  anvisierter Block (box = Form oder null fuer Wuerfel)
+     *   breakStage: 0..9 Riss-Stufe oder -1
+     *   entities: EntityBuffer mit allen Wesen (relativ zur Kamera)
      */
     draw(world, view, opts) {
       const { sky, underwater } = opts;
@@ -495,6 +640,7 @@ export function createRenderer(canvas) {
           gl.useProgram(flat.p);
           gl.uniformMatrix4fv(flat.u.u_vp, false, mul(vp, rotZ(sky.angle)));
           gl.uniform3f(flat.u.u_off, 0, 0, 0);
+          gl.uniform3f(flat.u.u_scale, 1, 1, 1);
           gl.uniform1f(flat.u.u_size, 2);
           const a = Math.max(0, sky.nightness - 0.3) * 1.4;
           gl.uniform4f(flat.u.u_color, 1, 1, 0.95, Math.min(1, a));
@@ -523,7 +669,9 @@ export function createRenderer(canvas) {
       gl.bindTexture(gl.TEXTURE_2D, atlasTex);
       gl.uniform1i(terrain.u.u_tex, 0);
       gl.uniformMatrix4fv(terrain.u.u_vp, false, vp);
-      gl.uniform1f(terrain.u.u_day, sky.day);
+      gl.uniform1f(terrain.u.u_skyLevel, sky.skyLevel);
+      gl.uniform3f(terrain.u.u_skyTint, sky.skyTint[0], sky.skyTint[1], sky.skyTint[2]);
+      gl.uniform1f(terrain.u.u_gamma, GAMMA);
       gl.uniform3f(terrain.u.u_fog, fogColor[0], fogColor[1], fogColor[2]);
       gl.uniform2f(terrain.u.u_fogRange, fogRange[0], fogRange[1]);
 
@@ -549,6 +697,29 @@ export function createRenderer(canvas) {
         verts += part.count;
       }
 
+      // Wesen: ein Zug fuer alle.
+      const ents = opts.entities;
+      if (ents && ents.n) {
+        gl.useProgram(entity.p);
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, entityTex);
+        gl.uniform1i(entity.u.u_tex, 0);
+        gl.uniformMatrix4fv(entity.u.u_vp, false, vp);
+        gl.uniform3f(entity.u.u_fog, fogColor[0], fogColor[1], fogColor[2]);
+        gl.uniform2f(entity.u.u_fogRange, fogRange[0], fogRange[1]);
+        gl.bindBuffer(gl.ARRAY_BUFFER, entityBuf);
+        const bytes = ents.n * 4;
+        if (bytes > entityCap) {
+          entityCap = Math.max(bytes, entityCap * 2);
+          gl.bufferData(gl.ARRAY_BUFFER, entityCap, gl.DYNAMIC_DRAW);
+        }
+        gl.bufferSubData(gl.ARRAY_BUFFER, 0, ents.a, 0, ents.n);
+        gl.bindVertexArray(entityVao);
+        gl.drawArrays(gl.TRIANGLES, 0, ents.vertices);
+        gl.useProgram(terrain.p);
+        gl.bindTexture(gl.TEXTURE_2D, atlasTex);
+      }
+
       // Wasser: von fern nach nah, durchscheinend.
       gl.enable(gl.BLEND);
       gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
@@ -562,17 +733,30 @@ export function createRenderer(canvas) {
         gl.drawArrays(gl.TRIANGLES, 0, part.count);
       }
 
-      // Umriss und Risse am anvisierten Block.
+      // Risse und Umriss am anvisierten Block.
       const t = opts.target;
       if (t) {
+        const b = t.box || [0, 0, 0, 1, 1, 1];
+        const box = [b[0] - E, b[1] - E, b[2] - E, b[3] + E, b[4] + E, b[5] + E];
+        if (opts.breakStage >= 0) {
+          gl.bindBuffer(gl.ARRAY_BUFFER, crackBuf);
+          gl.bufferSubData(gl.ARRAY_BUFFER, 0, crackMesh(box, Math.min(9, opts.breakStage)));
+          gl.uniform3f(terrain.u.u_off, t.x - view.x, t.y - view.y, t.z - view.z);
+          gl.enable(gl.POLYGON_OFFSET_FILL);
+          gl.polygonOffset(-1, -1);
+          gl.bindVertexArray(crackVao);
+          gl.drawArrays(gl.TRIANGLES, 0, 36);
+          gl.disable(gl.POLYGON_OFFSET_FILL);
+        }
         gl.useProgram(flat.p);
         gl.uniformMatrix4fv(flat.u.u_vp, false, vp);
-        gl.uniform3f(flat.u.u_off, t.x - view.x, t.y - view.y, t.z - view.z);
-        if (opts.breakProgress > 0) {
-          gl.uniform4f(flat.u.u_color, 0, 0, 0, 0.55 * opts.breakProgress);
-          gl.bindVertexArray(trisBuf.vao);
-          gl.drawArrays(gl.TRIANGLES, 0, 36);
-        }
+        gl.uniform3f(
+          flat.u.u_off,
+          t.x + box[0] - view.x,
+          t.y + box[1] - view.y,
+          t.z + box[2] - view.z,
+        );
+        gl.uniform3f(flat.u.u_scale, box[3] - box[0], box[4] - box[1], box[5] - box[2]);
         gl.uniform4f(flat.u.u_color, 0, 0, 0, 0.7);
         gl.bindVertexArray(linesBuf.vao);
         gl.drawArrays(gl.LINES, 0, 24);

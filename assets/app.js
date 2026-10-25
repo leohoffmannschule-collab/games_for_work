@@ -123,7 +123,7 @@ const GAMES = [
     title: 'Blockwelt',
     time: 'Frei',
     icon: icon.blockwelt,
-    desc: 'Eine unendliche 3D-Welt aus Blöcken: erkunden, bauen, überleben. Mit Tag und Nacht, Höhlen und Meeren.',
+    desc: 'Eine unendliche 3D-Welt aus Blöcken: erkunden, bauen, Werkzeuge herstellen, Tiere halten und Zombies abwehren.',
     load: () => import('./games/blockwelt.js'),
     headline: () => {
       const info = store.get('blockwelt:info');

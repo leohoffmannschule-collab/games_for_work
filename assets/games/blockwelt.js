@@ -2,49 +2,77 @@
  * Blockwelt – ein 3D-Sandkasten im Browser.
  *
  * Unendliche Welt aus Bloecken (Berge, Meere, Hoehlen, Waelder, Wueste), Tag und
- * Nacht, Bauen und Abbauen, Kreativ- und Ueberlebensmodus. Die Physik folgt den
- * dokumentierten Regeln des grossen Vorbilds (siehe blockwelt/player.js); Code,
- * Texturen und Namen sind komplett eigen.
+ * Nacht, Bauen und Abbauen, Werkzeuge und Handwerk, fliessendes Wasser, Fackeln,
+ * Tiere und Zombies, Hunger – im Kreativ- oder Ueberlebensmodus. Die Regeln folgen
+ * den dokumentierten Werten des grossen Vorbilds; Code, Texturen und Namen sind eigen.
  *
- * Dateien: world.js (Gelaende, Chunks), mesher.js (Dreiecke), render.js (WebGL2),
- * player.js (Bewegung), atlas.js (Texturen), blocks.js (Blockarten).
+ * Dateien unter blockwelt/: world.js (Gelaende, Chunks), fluids.js (Wasser),
+ * region.js (Licht), mesher.js (Dreiecke), render.js (WebGL2), entities.js (Physik,
+ * Wesen), player.js (Spieler, Hunger), models.js (Wesen-Modelle), items.js
+ * (Gegenstaende, Rezepte, Inventar), blocks.js (Blockarten), atlas.js (Grafiken).
  */
 
 import { World, CS, SEA } from './blockwelt/world.js';
-import { Player, TPS, HALF, HEIGHT } from './blockwelt/player.js';
-import { createRenderer, skyState } from './blockwelt/render.js';
-import { blockIcon } from './blockwelt/atlas.js';
+import { Player, TPS, HALF, HEIGHT, MAX_AIR } from './blockwelt/player.js';
+import { createRenderer, skyState, lightColor } from './blockwelt/render.js';
+import { itemIcon, hudIcon } from './blockwelt/atlas.js';
+import { MobManager, Mob, mobDrops } from './blockwelt/entities.js';
+import { EntityBuffer, addMob } from './blockwelt/models.js';
 import {
   BLOCKS,
-  PLACEABLE,
-  RECIPES,
   AIR,
   WATER,
-  SAND,
   BEDROCK,
   GRASS,
-  DIRT,
   STONE,
   PLANKS,
   BRICK,
   GLASS,
   LOG,
   LAMP,
+  TABLE,
+  FURNACE,
+  TORCH,
+  REPLACEABLE,
 } from './blockwelt/blocks.js';
+import {
+  ITEMS,
+  RECIPES,
+  CREATIVE_ITEMS,
+  FUELS,
+  Inventory,
+  itemName,
+  breakTicks,
+  drops,
+  wearOnBreak,
+  wearOnAttack,
+  attackDamage,
+  fuelValue,
+  BUCKET,
+  WATER_BUCKET,
+} from './blockwelt/items.js';
 
 const SAVE_KEY = 'blockwelt';
-const MAX_STACK = 64;
 const TICK_MS = 1000 / TPS;
 const SENSITIVITY = 0.0022;
 const TOUCH_SENSITIVITY = 0.0055;
 const STICK_R = 52; // Joystick-Radius in Pixeln
+const EAT_TICKS = 32; // 1,6 Sekunden wie im Vorbild
+const STATION_RANGE = 4;
 
 const MODES = { kreativ: 'Kreativ', ueberleben: 'Überleben' };
 const DISTANCES = { 4: 'Nah', 6: 'Mittel', 8: 'Weit' };
 
-const CREATIVE_BAR = [GRASS, DIRT, STONE, PLANKS, BRICK, GLASS, LOG, SAND, LAMP];
+const CREATIVE_BAR = [GRASS, STONE, PLANKS, GLASS, LOG, BRICK, TORCH, WATER_BUCKET, LAMP];
 
-const stack = (id, count = 1) => ({ id, count });
+const DEATH_TEXT = {
+  sturz: 'Du bist zu tief gefallen.',
+  zombie: 'Ein Zombie hat dich erwischt.',
+  wasser: 'Du bist ertrunken.',
+  hunger: 'Du bist verhungert.',
+};
+
+const stack = (id, count = 1) => ({ id, count, wear: 0 });
 
 export function createGame(ctx) {
   ctx.root.innerHTML = `
@@ -60,6 +88,7 @@ export function createGame(ctx) {
           .join('')}
       </div>
       <button class="btn" type="button" data-act="time">Tag / Nacht</button>
+      <button class="btn" type="button" data-act="monsters" aria-pressed="true">Monster</button>
       <button class="btn" type="button" data-act="full">Vollbild</button>
       <button class="btn" type="button" data-act="new">Neue Welt</button>
     </div>
@@ -67,11 +96,16 @@ export function createGame(ctx) {
       <canvas class="bw-canvas" id="cv"></canvas>
       <div class="bw-hud" id="hud" hidden>
         <div class="bw-cross"></div>
+        <div class="bw-use" id="use"><i></i></div>
         <div class="bw-tint" id="tint"></div>
         <div class="bw-flash" id="flash"></div>
         <pre class="bw-debug" id="debug" hidden></pre>
         <div class="bw-bottom">
-          <div class="bw-hearts" id="hearts"></div>
+          <div class="bw-stats" id="stats">
+            <div class="bw-row" id="hearts"></div>
+            <div class="bw-row right" id="food"></div>
+          </div>
+          <div class="bw-stats"><span></span><div class="bw-row right" id="air"></div></div>
           <div class="bw-hotbar" id="hotbar"></div>
         </div>
         <div class="bw-toast" id="toast"></div>
@@ -97,13 +131,14 @@ export function createGame(ctx) {
     <div class="keyhint">
       <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> laufen · <kbd>Leertaste</kbd> springen
       (im Kreativmodus zweimal tippen = fliegen) · <kbd>Strg</kbd> sprinten ·
-      <kbd>Shift</kbd> schleichen · linke Maustaste abbauen · rechte setzen ·
-      Mittelklick nimmt den Block auf · <kbd>1</kbd>–<kbd>9</kbd> / Mausrad wählt ·
-      <kbd>E</kbd> Inventar · <kbd>F3</kbd> Debug.
+      <kbd>Shift</kbd> schleichen · linke Maustaste abbauen und angreifen · rechte setzen,
+      essen, Eimer benutzen, Werkbank und Ofen öffnen · Mittelklick nimmt den Block auf ·
+      <kbd>1</kbd>–<kbd>9</kbd> / Mausrad wählt · <kbd>E</kbd> Inventar · <kbd>F3</kbd> Debug.
     </div>
     <div class="keyhint bw-touchhint">
       <strong>Am Handy:</strong> links wischen = gehen (ganz nach vorn = sprinten) · rechts wischen =
-      umschauen · kurz tippen = Block setzen · halten = abbauen · Leiste antippen wählt den Block.
+      umschauen · kurz tippen = setzen, essen oder angreifen · halten = abbauen · Leiste antippen
+      wählt.
     </div>`;
 
   const $ = (sel) => ctx.root.querySelector(sel);
@@ -114,12 +149,21 @@ export function createGame(ctx) {
   const panel = $('#panel');
   const hotbarEl = $('#hotbar');
   const heartsEl = $('#hearts');
+  const foodEl = $('#food');
+  const airEl = $('#air');
+  const statsEl = $('#stats');
+  const useEl = $('#use');
   const tintEl = $('#tint');
   const flashEl = $('#flash');
   const debugEl = $('#debug');
   const toastEl = $('#toast');
 
-  const renderer = createRenderer(canvas);
+  let renderer = null;
+  try {
+    renderer = createRenderer(canvas);
+  } catch (err) {
+    console.error(err);
+  }
   if (!renderer) {
     ctx.root.innerHTML = `<div class="panel">Blockwelt braucht WebGL 2 – dein Browser
       oder die Grafikbeschleunigung unterstützt das gerade nicht.</div>`;
@@ -132,15 +176,19 @@ export function createGame(ctx) {
   let mode = saved && MODES[saved.mode] ? saved.mode : 'kreativ';
   const coarse = window.matchMedia('(pointer: coarse)').matches;
   let renderDistance = saved && DISTANCES[saved.dist] ? saved.dist : coarse ? 4 : 6;
+  let monsters = saved ? saved.monsters !== false : true;
 
   const player = new Player();
+  const mobs = new MobManager();
+  const entityBuf = new EntityBuffer();
   let world;
   let time = 1000; // Tageszeit in Ticks, 0 = Sonnenaufgang
   let age = 0; // Gesamtalter der Welt in Ticks
-  let health = 20;
   let dead = false;
   let sel = 0;
-  const bars = { kreativ: [], ueberleben: [] };
+  let inv = new Inventory(36);
+  let creativeBar = [];
+  let fuel = 0; // Restglut im Ofen (in geschmolzenen Gegenstaenden)
   let wanted = [];
   let wantedCx = NaN;
   let wantedCz = NaN;
@@ -153,15 +201,18 @@ export function createGame(ctx) {
   // Touch-Steuerung: Joystick links, Umschauen rechts, dazu ein paar Knoepfe.
   const touch = { on: false, play: false, move: null, look: null, jump: false, sneak: false };
   let panelOpen = false;
+  let picked = -1; // ausgewaehlter Inventarplatz zum Tauschen
   let debugOn = false;
   let tapW = 0;
   let tapSpace = 0;
   let sprintKey = false;
   let breakCooldown = 0;
   let useCooldown = 0;
+  let attackTimer = 0;
   let breakTarget = null;
   let breakProgress = 0;
-  let target = null;
+  let eating = null;
+  let hit = { block: null, mob: null };
   let prev = { x: 0, y: 0, z: 0 };
   let acc = 0;
   let last = 0;
@@ -171,10 +222,14 @@ export function createGame(ctx) {
   let fps = 0;
   let frames = 0;
   let fpsAt = 0;
+  let statsKey = '';
 
   const playing = () => (locked || forcePlay || (touch.on && touch.play)) && !panelOpen && !dead;
   const creative = () => mode === 'kreativ';
-  const slots = () => bars[mode];
+  /** Die Schnellleiste: im Kreativmodus eigene 9 Plaetze, sonst die ersten 9 des Inventars. */
+  const bar = () => (creative() ? creativeBar : inv.slots);
+  const held = () => bar()[sel] || null;
+  const heldId = () => (held() ? held().id : 0);
 
   /* ------------------------------------------------------- Hilfsfunktionen -- */
 
@@ -185,47 +240,67 @@ export function createGame(ctx) {
     toastTimer = setTimeout(() => toastEl.classList.remove('on'), 1800);
   }
 
-  function resetBars() {
-    bars.kreativ = CREATIVE_BAR.map((id) => stack(id, 1));
-    bars.ueberleben = Array(9).fill(null);
+  function resetCreativeBar() {
+    creativeBar = CREATIVE_BAR.map((id) => stack(id, 1));
   }
 
-  /** Zaehlt einen Blocktyp im Ueberlebens-Inventar. */
-  function countOf(id) {
-    return bars.ueberleben.reduce((n, s) => n + (s && s.id === id ? s.count : 0), 0);
-  }
-
+  /** Legt Beute ins Inventar (nur im Ueberlebensmodus). */
   function give(id, n = 1) {
-    if (creative() || !id) return;
-    const s = bars.ueberleben;
-    for (const slot of s) {
-      if (slot && slot.id === id && slot.count < MAX_STACK) {
-        const add = Math.min(n, MAX_STACK - slot.count);
-        slot.count += add;
-        n -= add;
-        if (!n) break;
-      }
-    }
-    for (let i = 0; i < s.length && n > 0; i++) {
-      if (!s[i]) {
-        const add = Math.min(n, MAX_STACK);
-        s[i] = stack(id, add);
-        n -= add;
-      }
+    if (creative() || !id || n <= 0) return;
+    const rest = inv.add(id, n);
+    if (rest > 0) toast('Inventar voll – ' + itemName(id) + ' ging verloren.');
+    paintHotbar();
+  }
+
+  /** Verbraucht ein Stueck des gehaltenen Gegenstands (Ueberlebensmodus). */
+  function consumeHeld(n = 1) {
+    if (creative()) return;
+    const s = inv.slots[sel];
+    if (!s) return;
+    s.count -= n;
+    if (s.count <= 0) inv.slots[sel] = null;
+    paintHotbar();
+  }
+
+  /** Ersetzt den gehaltenen Gegenstand (z. B. Eimer -> Wassereimer). */
+  function swapHeld(id) {
+    if (creative()) return;
+    const s = inv.slots[sel];
+    if (s && s.count > 1) {
+      s.count--;
+      give(id, 1);
+    } else {
+      inv.slots[sel] = stack(id, 1);
     }
     paintHotbar();
   }
 
-  function take(id, n) {
-    for (const slot of bars.ueberleben) {
-      if (slot && slot.id === id) {
-        const t = Math.min(n, slot.count);
-        slot.count -= t;
-        n -= t;
-        if (!n) break;
+  function wearHeld(amount) {
+    if (creative() || !amount) return;
+    const s = inv.slots[sel];
+    const tool = s && ITEMS[s.id].tool;
+    if (!tool) return;
+    s.wear = (s.wear || 0) + amount;
+    if (s.wear >= tool.uses) {
+      inv.slots[sel] = null;
+      toast(itemName(s.id) + ' ist zerbrochen.');
+    }
+    paintHotbar();
+  }
+
+  function stationNear(id) {
+    const px = Math.floor(player.x);
+    const py = Math.floor(player.y);
+    const pz = Math.floor(player.z);
+    const r = STATION_RANGE;
+    for (let dy = -2; dy <= 3; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        for (let dz = -r; dz <= r; dz++) {
+          if (world.getBlock(px + dx, py + dy, pz + dz) === id) return true;
+        }
       }
     }
-    bars.ueberleben = bars.ueberleben.map((s) => (s && s.count > 0 ? s : null));
+    return false;
   }
 
   /* -------------------------------------------------------------- Welt -- */
@@ -234,39 +309,59 @@ export function createGame(ctx) {
     const seed = data ? data.seed : (Math.random() * 2 ** 31) | 0;
     world = new World(seed, data ? World.parseEdits(data.edits) : null);
     world.onChunkRemoved = (c) => renderer.freeChunk(c);
+    mobs.clear();
+    eating = null;
 
+    const p = data && data.player ? data.player : null;
+    player.resetStats();
     if (data) {
       time = data.time ?? 1000;
       age = data.age ?? 0;
-      health = data.health ?? 20;
-      bars.kreativ = (data.bars?.kreativ || []).map((s) => (s ? stack(s[0], s[1]) : null));
-      bars.ueberleben = (data.bars?.ueberleben || []).map((s) => (s ? stack(s[0], s[1]) : null));
-      if (bars.kreativ.length !== 9 || bars.ueberleben.length !== 9) resetBars();
-      sel = data.sel ?? 0;
+      sel = Math.min(8, data.sel ?? 0);
+      fuel = data.fuel || 0;
+      if (data.v >= 2) {
+        inv = Inventory.from(data.inventory);
+        creativeBar = (data.creative || []).map((s) => (s && ITEMS[s[0]] ? stack(s[0], 1) : null));
+        if (p) {
+          for (const k of ['health', 'food', 'saturation', 'exhaustion', 'air']) {
+            if (typeof p[k] === 'number') player[k] = p[k];
+          }
+        }
+      } else {
+        // Spielstand der ersten Version: nur eine Leiste je Modus.
+        inv = Inventory.from(data.bars && data.bars.ueberleben);
+        creativeBar = ((data.bars && data.bars.kreativ) || []).map((s) =>
+          s && ITEMS[s[0]] ? stack(s[0], 1) : null,
+        );
+        player.health = data.health ?? 20;
+      }
+      if (creativeBar.length !== 9) resetCreativeBar();
     } else {
       time = 1000;
       age = 0;
-      health = 20;
       sel = 0;
-      resetBars();
+      fuel = 0;
+      inv = new Inventory(36);
+      resetCreativeBar();
     }
     dead = false;
 
-    const p = data && data.player ? data.player : world.findSpawn();
-    const pcx = Math.floor(p.x / CS);
-    const pcz = Math.floor(p.z / CS);
-    for (let dz = -2; dz <= 2; dz++)
+    const spawn = p || world.findSpawn();
+    const pcx = Math.floor(spawn.x / CS);
+    const pcz = Math.floor(spawn.z / CS);
+    for (let dz = -2; dz <= 2; dz++) {
       for (let dx = -2; dx <= 2; dx++) world.generate(pcx + dx, pcz + dz);
-    player.teleport(p.x, p.y, p.z);
-    if (data && data.player) {
+    }
+    player.teleport(spawn.x, spawn.y, spawn.z);
+    if (p) {
       player.yaw = p.yaw || 0;
       player.pitch = p.pitch || 0;
-      player.flying = !!p.flying;
+      player.flying = !!p.flying && creative();
     } else {
       player.yaw = 0;
       player.pitch = -0.1;
       player.flying = false;
-      player.y = world.surfaceY(Math.floor(p.x), Math.floor(p.z)) + 1;
+      player.y = world.surfaceY(Math.floor(spawn.x), Math.floor(spawn.z)) + 1;
     }
     prev = { x: player.x, y: player.y, z: player.z };
     wantedCx = NaN;
@@ -275,16 +370,16 @@ export function createGame(ctx) {
 
   function save() {
     if (!world) return;
-    const pack = (arr) => arr.map((s) => (s ? [s.id, s.count] : null));
     ctx.store.set(SAVE_KEY, {
-      v: 1,
+      v: 2,
       seed: world.seed,
       mode,
       dist: renderDistance,
+      monsters,
       time,
       age,
-      health,
       sel,
+      fuel,
       player: {
         x: player.x,
         y: player.y,
@@ -292,8 +387,14 @@ export function createGame(ctx) {
         yaw: player.yaw,
         pitch: player.pitch,
         flying: player.flying,
+        health: player.health,
+        food: player.food,
+        saturation: player.saturation,
+        exhaustion: player.exhaustion,
+        air: player.air,
       },
-      bars: { kreativ: pack(bars.kreativ), ueberleben: pack(bars.ueberleben) },
+      inventory: inv.serialize(),
+      creative: creativeBar.map((s) => (s ? [s.id, 1] : null)),
       edits: world.serializeEdits(),
     });
     ctx.store.set('blockwelt:info', { days: Math.floor(age / 24000), mode });
@@ -335,109 +436,229 @@ export function createGame(ctx) {
 
   /* --------------------------------------------------------- Interaktion -- */
 
-  function reach() {
-    return creative() ? 5 : 4.5;
-  }
+  const reach = () => (creative() ? 5 : 4.5);
+  const attackReach = () => (creative() ? 5 : 3);
 
+  /** Was liegt unter dem Fadenkreuz: ein Block, ein Wesen oder nichts? */
   function aim(cam) {
     const f = player.forward();
-    return world.raycast(cam.x, cam.y, cam.z, f[0], f[1], f[2], reach());
+    const block = world.raycast(cam.x, cam.y, cam.z, f[0], f[1], f[2], reach());
+    let mob = null;
+    let best = Math.min(attackReach(), block ? block.dist : Infinity);
+    for (const m of mobs.list) {
+      if (m.dead) continue;
+      const d = m.hitByRay(cam.x, cam.y, cam.z, f[0], f[1], f[2], best);
+      if (d != null && d <= best) {
+        best = d;
+        mob = m;
+      }
+    }
+    return { block: mob ? null : block, mob };
   }
 
-  function dropSand(x, y, z) {
-    if (world.getBlock(x, y, z) !== SAND) return;
-    let ny = y;
-    while (ny > 1) {
-      const below = world.getBlock(x, ny - 1, z);
-      if (below !== AIR && below !== WATER) break;
-      ny--;
-    }
-    if (ny !== y) {
-      world.setBlock(x, y, z, AIR);
-      world.setBlock(x, ny, z, SAND);
-    }
-  }
-
-  function breakBlock(t) {
-    const def = BLOCKS[t.id];
-    if (!def || t.id === BEDROCK) return;
+  function breakAt(t) {
+    if (t.id === BEDROCK) return;
     if (!world.setBlock(t.x, t.y, t.z, AIR)) return;
-    give(def.drop);
-    for (let y = t.y + 1; world.getBlock(t.x, y, t.z) === SAND; y++) dropSand(t.x, y, t.z);
+    if (creative()) return;
+    const tool = heldId();
+    for (const [id, n] of drops(t.id, tool)) give(id, n);
+    wearHeld(wearOnBreak(tool, t.id));
+    player.exhaust(0.005);
   }
 
-  function overlapsPlayer(x, y, z) {
-    return (
-      x + 1 > player.x - HALF &&
-      x < player.x + HALF &&
-      y + 1 > player.y &&
-      y < player.y + HEIGHT &&
-      z + 1 > player.z - HALF &&
-      z < player.z + HALF
-    );
+  function blockedByBody(x, y, z) {
+    const overlaps = (b) =>
+      x + 1 > b.x - b.half &&
+      x < b.x + b.half &&
+      y + 1 > b.y &&
+      y < b.y + b.height &&
+      z + 1 > b.z - b.half &&
+      z < b.z + b.half;
+    if (overlaps({ x: player.x, y: player.y, z: player.z, half: HALF, height: HEIGHT }))
+      return true;
+    return mobs.list.some((m) => !m.dead && overlaps(m));
   }
 
-  function placeBlock(t) {
-    const slot = slots()[sel];
-    if (!slot) return;
-    const x = t.x + t.nx;
-    const y = t.y + t.ny;
-    const z = t.z + t.nz;
-    const there = world.getBlock(x, y, z);
-    if (there !== AIR && there !== WATER) return;
-    if (BLOCKS[slot.id].solid && overlapsPlayer(x, y, z)) return;
-    if (!world.setBlock(x, y, z, slot.id)) return;
-    if (slot.id === SAND) dropSand(x, y, z);
-    if (!creative()) {
-      slot.count--;
-      if (slot.count <= 0) slots()[sel] = null;
-      paintHotbar();
+  /** Front des Ofens zeigt zum Spieler (Zustand 0..3 = -z, +x, +z, -x). */
+  function facingToward(x, z) {
+    const dx = player.x - (x + 0.5);
+    const dz = player.z - (z + 0.5);
+    if (Math.abs(dx) > Math.abs(dz)) return dx > 0 ? 1 : 3;
+    return dz > 0 ? 2 : 0;
+  }
+
+  function placeItem(t, s) {
+    const id = ITEMS[s.id].block;
+    if (!id) return false;
+    const def = BLOCKS[id];
+    let x = t.x + t.nx;
+    let y = t.y + t.ny;
+    let z = t.z + t.nz;
+    let intoTarget = false;
+    if (REPLACEABLE[t.id] && t.id !== WATER) {
+      x = t.x;
+      y = t.y;
+      z = t.z;
+      intoTarget = true;
     }
+    const there = world.getBlock(x, y, z);
+    if (there !== AIR && !REPLACEABLE[there]) return false;
+    let meta = 0;
+    if (id === TORCH) {
+      if (!intoTarget && t.ny === -1) return false; // nicht an die Decke
+      if (!intoTarget && t.ny === 0) {
+        if (t.nx === 1) meta = 1;
+        else if (t.nx === -1) meta = 2;
+        else if (t.nz === 1) meta = 3;
+        else if (t.nz === -1) meta = 4;
+      }
+    } else if (id === FURNACE) {
+      meta = facingToward(x, z);
+    }
+    if (!world.hasSupport(x, y, z, id, meta)) return false;
+    if (def.solid && blockedByBody(x, y, z)) return false;
+    if (!world.setBlock(x, y, z, id, meta)) return false;
+    consumeHeld(1);
+    return true;
+  }
+
+  function fillBucket(cam) {
+    const f = player.forward();
+    const t = world.raycast(cam.x, cam.y, cam.z, f[0], f[1], f[2], reach(), true);
+    if (!t || t.id !== WATER) return false;
+    if (!world.setBlock(t.x, t.y, t.z, AIR)) return false;
+    swapHeld(WATER_BUCKET);
+    return true;
+  }
+
+  function pourBucket(t) {
+    if (!t) return false;
+    let x = t.x + t.nx;
+    let y = t.y + t.ny;
+    let z = t.z + t.nz;
+    if (REPLACEABLE[t.id]) {
+      x = t.x;
+      y = t.y;
+      z = t.z;
+    }
+    const there = world.getBlock(x, y, z);
+    if (there !== AIR && !REPLACEABLE[there]) return false;
+    if (!world.setBlock(x, y, z, WATER, 0)) return false;
+    swapHeld(BUCKET);
+    return true;
+  }
+
+  function startEating(auto) {
+    const s = held();
+    if (!s || !ITEMS[s.id].food || creative()) return false;
+    if (player.food >= 20) {
+      toast('Du bist satt.');
+      return false;
+    }
+    eating = { ticks: 0, slot: sel, id: s.id, auto };
+    return true;
+  }
+
+  /** Rechtsklick bzw. kurzes Tippen. */
+  function use(h, auto) {
+    const b = h.block;
+    if (b && (b.id === TABLE || b.id === FURNACE) && !player.sneaking) {
+      setPanel(true);
+      return;
+    }
+    const s = held();
+    if (!s) return;
+    const it = ITEMS[s.id];
+    if (it.food) startEating(auto);
+    else if (s.id === BUCKET) fillBucket(camera(1));
+    else if (s.id === WATER_BUCKET) pourBucket(b);
+    else if (it.block && b) placeItem(b, s);
+  }
+
+  function attack(mob) {
+    const tool = heldId();
+    let dmg = attackDamage(tool);
+    // Kritischer Treffer im Fallen wie im Vorbild.
+    if (player.fallDistance > 0 && !player.onGround && !player.inWater && !player.flying)
+      dmg *= 1.5;
+    const done = mob.hurt(dmg, player);
+    if (!done) return;
+    if (!creative()) {
+      wearHeld(wearOnAttack(tool));
+      player.exhaust(0.1);
+    }
+    if (mob.dead) for (const [id, n] of mobDrops(mob)) give(id, n);
   }
 
   function pickBlock(t) {
-    if (!creative()) return;
-    const bar = slots();
-    const at = bar.findIndex((s) => s && s.id === t.id);
+    if (!creative() || !t || !ITEMS[t.id]) return;
+    const at = creativeBar.findIndex((s) => s && s.id === t.id);
     if (at >= 0) sel = at;
-    else bar[sel] = stack(t.id, 1);
+    else creativeBar[sel] = stack(t.id, 1);
     paintHotbar();
   }
 
   /* ---------------------------------------------------------- Spieltick -- */
 
-  function damage(n) {
+  function hurtPlayer(amount, cause, from) {
     if (creative() || dead) return;
-    health = Math.max(0, health - n);
+    const done = player.hurt(amount, cause);
+    if (!done) return;
+    if (from) player.knockback(from.x, from.z);
     flashAlpha = 0.5;
-    paintHearts();
-    if (health <= 0) die();
+    paintStats();
+    if (player.health <= 0) die();
   }
 
   function die() {
     dead = true;
+    eating = null;
     mouse.left = mouse.right = false;
     if (document.pointerLockElement) document.exitPointerLock();
     setTouchPlay(false);
-    showOverlay('Du bist gestorben', 'Dein Inventar bleibt erhalten.', 'Wiederbeleben', respawn);
+    showOverlay(
+      'Du bist gestorben',
+      (DEATH_TEXT[player.cause] || '') + ' Dein Inventar bleibt erhalten.',
+      'Wiederbeleben',
+      respawn,
+    );
   }
 
   function respawn() {
     const s = world.findSpawn();
     for (let dz = -1; dz <= 1; dz++) {
-      for (let dx = -1; dx <= 1; dx++)
+      for (let dx = -1; dx <= 1; dx++) {
         world.generate(Math.floor(s.x / CS) + dx, Math.floor(s.z / CS) + dz);
+      }
     }
     player.teleport(s.x, world.surfaceY(Math.floor(s.x), Math.floor(s.z)) + 1, s.z);
     prev = { x: player.x, y: player.y, z: player.z };
-    health = 20;
+    player.resetStats();
     dead = false;
-    paintHearts();
+    paintStats();
     showPause();
   }
 
-  function tick() {
-    prev = { x: player.x, y: player.y, z: player.z };
+  function mobEnv(sky) {
+    return {
+      player,
+      targetable: !creative() && !dead,
+      isDay: sky.day > 0.6,
+      night: sky.day < 0.35,
+      monsters,
+      rnd: Math.random,
+      despawn: renderDistance * CS + 8,
+      attack: (mob, target) => {
+        if (target === player) hurtPlayer(mob.species.damage, 'zombie', mob);
+      },
+      loadedLight: (x, y, z) => {
+        const c = world.getChunk(x >> 4, z >> 4);
+        return c && c.light ? world.lightAt(x, y, z) : null;
+      },
+    };
+  }
+
+  function readInput() {
     const k = (c) => keys.has(c);
     const input = {
       forward: (k('KeyW') || k('ArrowUp') ? 1 : 0) - (k('KeyS') || k('ArrowDown') ? 1 : 0),
@@ -445,6 +666,7 @@ export function createGame(ctx) {
       jump: k('Space'),
       sneak: k('ShiftLeft') || k('ShiftRight'),
       sprint: k('ControlLeft') || sprintKey,
+      noSprint: !creative() && !player.canSprint,
     };
     if (touch.on) {
       const m = touch.move;
@@ -463,44 +685,89 @@ export function createGame(ctx) {
       input.forward = input.strafe = 0;
       input.jump = input.sneak = false;
     }
-    player.tick(world, input);
-    if (player.landedDamage) damage(player.landedDamage);
+    return input;
+  }
+
+  function tick() {
+    prev = { x: player.x, y: player.y, z: player.z };
+    player.tick(world, readInput());
+    if (!creative()) {
+      player.survivalTick();
+      if (player.hurtTime === 10) {
+        flashAlpha = 0.5;
+        if (player.health <= 0 && !dead) die();
+      }
+    } else {
+      player.health = 20;
+      player.air = MAX_AIR;
+    }
+
+    world.tick();
+    const sky = skyState(time);
+    mobs.tick(world, mobEnv(sky));
+    if (age === 40) mobs.spawnAnimals(world, mobEnv(sky), 10);
+
+    // Weggespuelte oder abgefallene Fackeln und Pflanzen landen im Inventar.
+    for (const e of world.events.splice(0)) {
+      if (e.type !== 'drop' || creative()) continue;
+      if (Math.hypot(e.x + 0.5 - player.x, e.z + 0.5 - player.z) > 8) continue;
+      for (const [id, n] of drops(e.id, 0)) give(id, n);
+    }
 
     time = (time + 1) % 24000;
     age++;
-    if (!creative() && !dead && health < 20 && age % 80 === 0) {
-      health++;
-      paintHearts();
-    }
-
     if (breakCooldown > 0) breakCooldown--;
     if (useCooldown > 0) useCooldown--;
+    if (attackTimer > 0) attackTimer--;
 
-    if (!playing()) return;
-    const cam = camera(1);
-    target = aim(cam);
+    // Essen.
+    if (eating) {
+      const s = held();
+      if (eating.slot !== sel || !s || s.id !== eating.id || (!eating.auto && !mouse.right)) {
+        eating = null;
+      } else if (++eating.ticks >= EAT_TICKS) {
+        const [food, sat] = ITEMS[s.id].food;
+        player.eat(food, sat);
+        consumeHeld(1);
+        eating = null;
+      }
+    }
 
-    if (mouse.left && target) {
+    if (dead || !playing()) return;
+    hit = aim(camera(1));
+
+    if (mouse.left && hit.mob) {
+      if (attackTimer === 0) {
+        attack(hit.mob);
+        attackTimer = 10;
+      }
+      breakProgress = 0;
+      breakTarget = null;
+    } else if (mouse.left && hit.block) {
+      const t = hit.block;
       if (creative()) {
         if (breakCooldown === 0) {
-          breakBlock(target);
+          breakAt(t);
           breakCooldown = 5;
         }
       } else {
-        const hardness = BLOCKS[target.id].hardness;
         if (
           !breakTarget ||
-          breakTarget.x !== target.x ||
-          breakTarget.y !== target.y ||
-          breakTarget.z !== target.z
+          breakTarget.x !== t.x ||
+          breakTarget.y !== t.y ||
+          breakTarget.z !== t.z
         ) {
-          breakTarget = { x: target.x, y: target.y, z: target.z };
+          breakTarget = { x: t.x, y: t.y, z: t.z };
           breakProgress = 0;
         }
-        if (breakCooldown === 0 && Number.isFinite(hardness)) {
-          breakProgress += 1 / Math.max(1, hardness * 1.5 * TPS);
+        if (breakCooldown === 0) {
+          const ticks = breakTicks(t.id, heldId(), {
+            inWater: player.headInWater,
+            onGround: player.onGround || player.flying,
+          });
+          if (Number.isFinite(ticks)) breakProgress += ticks === 0 ? 1 : 1 / ticks;
           if (breakProgress >= 1) {
-            breakBlock(target);
+            breakAt(t);
             breakProgress = 0;
             breakTarget = null;
             breakCooldown = 5;
@@ -512,8 +779,10 @@ export function createGame(ctx) {
       breakTarget = null;
     }
 
-    if (mouse.right && target && useCooldown === 0) {
-      placeBlock(target);
+    if (mouse.right && useCooldown === 0 && !eating) {
+      const s = held();
+      if (!(s && (s.id === BUCKET || s.id === WATER_BUCKET) && mouse.rightUsed)) use(hit, false);
+      mouse.rightUsed = true;
       useCooldown = 4;
     }
   }
@@ -541,6 +810,18 @@ export function createGame(ctx) {
   observer.observe(stage);
   ctx.onDestroy(() => observer.disconnect());
 
+  function mobColor(m, sky) {
+    const l = world.lightAt(Math.floor(m.x), Math.floor(m.y + m.eyeHeight), Math.floor(m.z));
+    const c = lightColor(l.sky, l.block, sky);
+    if (m.hurtTime > 0 || m.dead) return [c[0], c[1] * 0.45, c[2] * 0.45];
+    if (m.burning > 0) {
+      // Brennende Wesen glimmen orange, auch in der Nacht.
+      const f = 0.85 + Math.sin(m.age * 1.7) * 0.15;
+      return [c[0] * 0.6 + 0.4 * f, c[1] * 0.6 + 0.2 * f, c[2] * 0.6 + 0.06 * f];
+    }
+    return c;
+  }
+
   function frame(now) {
     raf = requestAnimationFrame(frame);
     const dt = Math.min(now - last, 250);
@@ -562,13 +843,18 @@ export function createGame(ctx) {
 
     stream();
 
-    const cam = camera(playing() ? acc / TICK_MS : 1);
-    if (!playing()) target = null;
-    else target = aim(cam);
+    const alpha = playing() ? acc / TICK_MS : 1;
+    const cam = camera(alpha);
+    if (playing()) hit = aim(cam);
+    else hit = { block: null, mob: null };
     const sky = skyState(time);
     const eyeBlock = world.getBlock(Math.floor(cam.x), Math.floor(cam.y), Math.floor(cam.z));
     const underwater = eyeBlock === WATER;
 
+    entityBuf.reset();
+    for (const m of mobs.list) addMob(entityBuf, m, playing() ? alpha : 1, cam, mobColor(m, sky));
+
+    const t = hit.block;
     renderer.draw(
       world,
       {
@@ -579,7 +865,14 @@ export function createGame(ctx) {
         pitch: player.pitch,
         fov: 70 + (player.sprinting ? 6 : 0),
       },
-      { sky, renderDistance, underwater, target, breakProgress },
+      {
+        sky,
+        renderDistance,
+        underwater,
+        target: t,
+        breakStage: breakProgress > 0 && t ? Math.floor(breakProgress * 10) : -1,
+        entities: entityBuf,
+      },
     );
 
     tintEl.style.opacity = underwater ? '1' : '0';
@@ -587,13 +880,17 @@ export function createGame(ctx) {
       flashAlpha = Math.max(0, flashAlpha - dt / 600);
       flashEl.style.opacity = String(flashAlpha);
     }
+    const useProgress = eating ? eating.ticks / EAT_TICKS : 0;
+    useEl.classList.toggle('on', useProgress > 0);
+    useEl.firstElementChild.style.width = Math.round(useProgress * 100) + '%';
+    paintStats();
 
     frames++;
     if (now - fpsAt > 500) {
       fps = Math.round((frames * 1000) / (now - fpsAt));
       frames = 0;
       fpsAt = now;
-      if (debugOn) paintDebug(sky);
+      if (debugOn) paintDebug();
     }
   }
 
@@ -609,43 +906,80 @@ export function createGame(ctx) {
           : 'Norden (-z)';
     const hour = Math.floor((time / 1000 + 6) % 24);
     const min = Math.floor(((time % 1000) / 1000) * 60);
+    const l = world.lightAt(Math.floor(player.x), Math.floor(player.y), Math.floor(player.z));
+    const target = hit.mob
+      ? `${hit.mob.species.name} (${Math.ceil(hit.mob.health)} Leben)`
+      : hit.block
+        ? `${hit.block.x} ${hit.block.y} ${hit.block.z} (${BLOCKS[hit.block.id].name})`
+        : '–';
     debugEl.textContent = [
       `${fps} FPS · Chunks ${world.chunks.size} · sichtbar ${renderer.stats.drawn} · ${(renderer.stats.verts / 1000).toFixed(0)}k Ecken`,
       `XYZ ${player.x.toFixed(2)} ${player.y.toFixed(2)} ${player.z.toFixed(2)}`,
       `Chunk ${Math.floor(player.x / CS)} ${Math.floor(player.z / CS)} · Blick ${dir}`,
       `Tempo ${(Math.hypot(player.vx, player.vz) * TPS).toFixed(2)} m/s · ${player.onGround ? 'am Boden' : player.flying ? 'fliegt' : player.inWater ? 'schwimmt' : 'in der Luft'}`,
+      `Licht Himmel ${l.sky} · Block ${l.block}`,
+      `Hunger ${player.food} · Sättigung ${player.saturation.toFixed(1)} · Erschöpfung ${player.exhaustion.toFixed(2)}`,
+      `Tiere ${mobs.passiveCount} · Monster ${mobs.hostileCount} · Wasser-Updates ${world.fluidQueue.size}`,
       `Zeit ${String(hour).padStart(2, '0')}:${String(min).padStart(2, '0')} · Tag ${Math.floor(age / 24000) + 1}`,
       `Seed ${world.seed} · Meereshöhe ${SEA}`,
-      target ? `Ziel ${target.x} ${target.y} ${target.z} (${BLOCKS[target.id].name})` : 'Ziel –',
+      `Ziel ${target}`,
     ].join('\n');
   }
 
   /* ----------------------------------------------------------------- HUD -- */
 
+  function slotHtml(s, i, extraClass = '') {
+    if (!s) return `<div class="bw-slot${extraClass}" data-i="${i}" title="leer"></div>`;
+    const it = ITEMS[s.id];
+    const icon = `<img src="${itemIcon(s.id)}" alt="${it.name}" draggable="false">`;
+    const n = s.count > 1 && !(creative() && extraClass.includes('bar')) ? `<b>${s.count}</b>` : '';
+    let wear = '';
+    if (it.tool && s.wear) {
+      const left = 1 - s.wear / it.tool.uses;
+      wear = `<i class="bw-dur" style="width:${Math.round(left * 80)}%;background:hsl(${Math.round(left * 120)},80%,45%)"></i>`;
+    }
+    return `<div class="bw-slot${extraClass}" data-i="${i}" title="${it.name}">${icon}${n}${wear}</div>`;
+  }
+
   function paintHotbar() {
-    hotbarEl.innerHTML = slots()
-      .map((s, i) => {
-        const icon = s
-          ? `<img src="${blockIcon(s.id)}" alt="${BLOCKS[s.id].name}" draggable="false">`
-          : '';
-        const n = s && !creative() ? `<b>${s.count}</b>` : '';
-        return `<div class="bw-slot${i === sel ? ' sel' : ''}" data-i="${i}" title="${s ? BLOCKS[s.id].name : 'leer'}">${icon}${n}</div>`;
-      })
-      .join('');
+    const slots = bar();
+    let html = '';
+    for (let i = 0; i < 9; i++) html += slotHtml(slots[i], i, (i === sel ? ' sel' : '') + ' bar');
+    hotbarEl.innerHTML = html;
     if (panelOpen) paintPanel();
   }
 
-  function paintHearts() {
+  function icons(kind, value, max = 20) {
+    let out = '';
+    for (let i = 0; i < max / 2; i++) {
+      const v = value - i * 2;
+      const state = v >= 2 ? 'full' : v >= 1 ? 'half' : 'empty';
+      out += `<img src="${hudIcon(kind, state)}" alt="">`;
+    }
+    return out;
+  }
+
+  function paintStats() {
+    const hp = Math.ceil(player.health);
+    const air =
+      player.headInWater || player.air < MAX_AIR
+        ? Math.max(0, Math.ceil((player.air * 10) / MAX_AIR))
+        : -1;
+    const key = `${mode}|${hp}|${player.food}|${air}`;
+    if (key === statsKey) return;
+    statsKey = key;
     if (creative()) {
-      heartsEl.innerHTML = '';
+      statsEl.hidden = true;
+      airEl.innerHTML = '';
       return;
     }
-    let out = '';
-    for (let i = 0; i < 10; i++) {
-      const v = health - i * 2;
-      out += `<i class="${v >= 2 ? 'full' : v === 1 ? 'half' : 'empty'}">♥</i>`;
-    }
-    heartsEl.innerHTML = out;
+    statsEl.hidden = false;
+    heartsEl.innerHTML = icons('heart', hp);
+    foodEl.innerHTML = icons('food', player.food);
+    let bubbles = '';
+    if (air >= 0)
+      for (let i = 0; i < air; i++) bubbles += `<img src="${hudIcon('bubble')}" alt="">`;
+    airEl.innerHTML = bubbles;
   }
 
   function paintToolbar() {
@@ -656,47 +990,128 @@ export function createGame(ctx) {
     for (const b of ctx.root.querySelectorAll('[data-dist]')) {
       b.setAttribute('aria-pressed', String(Number(b.dataset.dist) === renderDistance));
     }
+    const mb = ctx.root.querySelector('[data-act="monsters"]');
+    mb.setAttribute('aria-pressed', String(monsters));
+    mb.classList.toggle('on', monsters);
+    mb.textContent = monsters ? 'Monster an' : 'Monster aus';
   }
 
   function paintAll() {
+    statsKey = '';
     paintToolbar();
     paintHotbar();
-    paintHearts();
+    paintStats();
+  }
+
+  /* -------------------------------------------------------------- Inventar -- */
+
+  function recipeHtml(r, i, near) {
+    const station = r.at === TABLE ? near.table : r.at === FURNACE ? near.furnace : true;
+    const have = inv.canCraft(r);
+    const fuelOk = r.at !== FURNACE || fuelAvailable(r) >= 1;
+    const can = have && station && fuelOk;
+    const ins = r.in
+      .map(([id, n]) => {
+        const ok = inv.count(id) >= n;
+        return `<span class="bw-ing${ok ? '' : ' missing'}"><img src="${itemIcon(id)}" alt="" draggable="false">${n}× ${itemName(id)}</span>`;
+      })
+      .join('<span class="bw-plus">+</span>');
+    let why = '';
+    if (!station) why = r.at === TABLE ? 'Werkbank nötig' : 'Ofen nötig';
+    else if (!have) why = 'Zutaten fehlen';
+    else if (!fuelOk) why = 'Brennstoff fehlt';
+    const [out, n] = r.out;
+    return `<div class="bw-recipe${can ? '' : ' off'}"><span class="bw-ins">${ins}</span><span class="bw-arrow">→</span>
+      <span class="bw-ing"><img src="${itemIcon(out)}" alt="" draggable="false">${n}× ${itemName(out)}</span>
+      <button type="button" class="btn${can ? ' primary' : ''}" data-recipe="${i}" ${can ? '' : 'disabled'}>${can ? 'Herstellen' : why}</button></div>`;
+  }
+
+  /** Brennstoff, der fuer ein Rezept bereitsteht (ohne die eigenen Zutaten zu verheizen). */
+  function fuelAvailable(r) {
+    let total = fuel;
+    for (const id of FUELS) {
+      const need = r.in.filter(([i]) => i === id).reduce((a, [, n]) => a + n, 0);
+      total += Math.max(0, inv.count(id) - need) * fuelValue(id);
+    }
+    return total;
+  }
+
+  function burnFuel(r) {
+    for (const id of FUELS) {
+      if (fuel >= 1) break;
+      const need = r.in.filter(([i]) => i === id).reduce((a, [, n]) => a + n, 0);
+      while (fuel < 1 && inv.count(id) > need) {
+        inv.remove(id, 1);
+        fuel += fuelValue(id);
+      }
+    }
+    return fuel >= 1;
+  }
+
+  function craft(r) {
+    const near = { table: stationNear(TABLE), furnace: stationNear(FURNACE) };
+    if (r.at === TABLE && !near.table) return toast('Dafür brauchst du eine Werkbank in der Nähe.');
+    if (r.at === FURNACE && !near.furnace)
+      return toast('Dafür brauchst du einen Ofen in der Nähe.');
+    if (r.at === FURNACE && !burnFuel(r))
+      return toast('Es fehlt Brennstoff (Kohle, Holz oder Bretter).');
+    const err = inv.craft(r);
+    if (err) return toast(err);
+    if (r.at === FURNACE) fuel -= 1;
+    paintHotbar();
   }
 
   function paintPanel() {
     if (creative()) {
       panel.innerHTML = `
-        <div class="bw-panel-head"><strong>Bausteine</strong><span>Klick belegt den gewählten Platz in der Leiste.</span></div>
-        <div class="bw-grid">${PLACEABLE.map(
-          (
-            id,
-          ) => `<button type="button" class="bw-item" data-block="${id}" title="${BLOCKS[id].name}">
-            <img src="${blockIcon(id)}" alt="" draggable="false"><span>${BLOCKS[id].name}</span></button>`,
+        <div class="bw-panel-head"><strong>Bausteine und Gegenstände</strong>
+          <span>Antippen legt den Gegenstand auf den gewählten Platz der Leiste.</span>
+          <button type="button" class="btn" data-close>Schließen</button></div>
+        <div class="bw-grid">${CREATIVE_ITEMS.map(
+          (id) => `<button type="button" class="bw-item" data-item="${id}" title="${itemName(id)}">
+            <img src="${itemIcon(id)}" alt="" draggable="false"><span>${itemName(id)}</span></button>`,
         ).join('')}</div>`;
-    } else {
-      panel.innerHTML = `
-        <div class="bw-panel-head"><strong>Herstellen</strong><span>Zutaten kommen aus deiner Leiste.</span></div>
-        <div class="bw-recipes">${RECIPES.map((r, i) => {
-          const can = r.in.every(([id, n]) => countOf(id) >= n);
-          const ins = r.in
-            .map(
-              ([id, n]) =>
-                `<span class="bw-ing"><img src="${blockIcon(id)}" alt="" draggable="false">${n}× ${BLOCKS[id].name}</span>`,
-            )
-            .join(' + ');
-          return `<div class="bw-recipe"><span>${ins}</span><span>→</span>
-            <span class="bw-ing"><img src="${blockIcon(r.out[0])}" alt="" draggable="false">${r.out[1]}× ${BLOCKS[r.out[0]].name}</span>
-            <button type="button" class="btn${can ? ' primary' : ''}" data-recipe="${i}" ${can ? '' : 'disabled'}>Herstellen</button></div>`;
-        }).join('')}</div>`;
+      return;
     }
+    const near = { table: stationNear(TABLE), furnace: stationNear(FURNACE) };
+    const groups = [
+      ['Aus der Hand', null],
+      ['An der Werkbank', TABLE],
+      ['Im Ofen', FURNACE],
+    ];
+    const pickedStack = picked >= 0 ? inv.slots[picked] : null;
+    let main = '';
+    for (let i = 9; i < 36; i++) main += slotHtml(inv.slots[i], i, i === picked ? ' picked' : '');
+    let hot = '';
+    for (let i = 0; i < 9; i++) hot += slotHtml(inv.slots[i], i, i === picked ? ' picked' : '');
+    const fuelText =
+      fuel > 0 ? ` · Glut im Ofen reicht noch für ${Math.floor(fuel * 10) / 10} Vorgänge` : '';
+    panel.innerHTML = `
+      <div class="bw-panel-head"><strong>Inventar</strong>
+        <span>${pickedStack ? itemName(pickedStack.id) + ' gewählt – zweiten Platz antippen zum Tauschen.' : 'Platz antippen, dann einen zweiten zum Tauschen.'}</span>
+        ${pickedStack ? '<button type="button" class="btn" data-trash>Wegwerfen</button>' : ''}
+        <button type="button" class="btn" data-close>Schließen</button></div>
+      <div class="bw-invgrid">${main}</div>
+      <div class="bw-invgrid bw-invbar">${hot}</div>
+      <div class="bw-panel-head"><strong>Herstellen</strong>
+        <span>Werkbank ${near.table ? 'in der Nähe' : 'nicht in der Nähe'} · Ofen ${near.furnace ? 'in der Nähe' : 'nicht in der Nähe'}${fuelText}</span></div>
+      ${groups
+        .map(
+          ([title, at]) =>
+            `<div class="bw-group">${title}</div><div class="bw-recipes">${RECIPES.map((r, i) =>
+              r.at === at ? recipeHtml(r, i, near) : '',
+            ).join('')}</div>`,
+        )
+        .join('')}`;
   }
 
   function setPanel(open) {
     panelOpen = open;
     panel.hidden = !open;
+    picked = -1;
     if (open) {
       mouse.left = mouse.right = false;
+      eating = null;
       endTouches();
       if (document.pointerLockElement) document.exitPointerLock();
       paintPanel();
@@ -785,7 +1200,7 @@ export function createGame(ctx) {
       if (e.code === 'KeyE') {
         e.preventDefault();
         setPanel(!panelOpen);
-        if (!panelOpen) lock();
+        if (!panelOpen && !touch.on) lock();
         return;
       }
       if (panelOpen) return;
@@ -795,6 +1210,7 @@ export function createGame(ctx) {
         e.preventDefault();
         debugOn = !debugOn;
         debugEl.hidden = !debugOn;
+        if (debugOn) paintDebug();
         return;
       }
       if (e.repeat) return;
@@ -822,6 +1238,7 @@ export function createGame(ctx) {
   ctx.on(window, 'blur', () => {
     keys.clear();
     sprintKey = false;
+    mouse.left = mouse.right = false;
   });
 
   ctx.on(document, 'mousemove', (e) => {
@@ -834,11 +1251,14 @@ export function createGame(ctx) {
   ctx.on(canvas, 'mousedown', (e) => {
     if (!playing()) return;
     e.preventDefault();
-    if (e.button === 0) mouse.left = true;
-    else if (e.button === 2) {
+    if (e.button === 0) {
+      mouse.left = true;
+      attackTimer = 0;
+    } else if (e.button === 2) {
       mouse.right = true;
+      mouse.rightUsed = false;
       useCooldown = 0;
-    } else if (e.button === 1 && target) pickBlock(target);
+    } else if (e.button === 1) pickBlock(hit.block);
   });
   ctx.on(window, 'mouseup', (e) => {
     if (e.button === 0) mouse.left = false;
@@ -866,20 +1286,37 @@ export function createGame(ctx) {
   });
 
   ctx.on(panel, 'click', (e) => {
-    const item = e.target.closest('[data-block]');
+    if (e.target.closest('[data-close]')) {
+      setPanel(false);
+      if (!touch.on) lock();
+      return;
+    }
+    const item = e.target.closest('[data-item]');
     if (item) {
-      slots()[sel] = stack(Number(item.dataset.block), 1);
+      creativeBar[sel] = stack(Number(item.dataset.item), 1);
+      paintHotbar();
+      return;
+    }
+    if (e.target.closest('[data-trash]')) {
+      if (picked >= 0) inv.slots[picked] = null;
+      picked = -1;
+      paintHotbar();
+      return;
+    }
+    const slot = e.target.closest('.bw-slot');
+    if (slot && !creative()) {
+      const i = Number(slot.dataset.i);
+      if (picked < 0) {
+        if (inv.slots[i]) picked = i;
+      } else {
+        inv.move(picked, i);
+        picked = -1;
+      }
       paintHotbar();
       return;
     }
     const rec = e.target.closest('[data-recipe]');
-    if (rec) {
-      const r = RECIPES[Number(rec.dataset.recipe)];
-      if (!r.in.every(([id, n]) => countOf(id) >= n)) return;
-      for (const [id, n] of r.in) take(id, n);
-      give(r.out[0], r.out[1]);
-      paintHotbar();
-    }
+    if (rec) craft(RECIPES[Number(rec.dataset.recipe)]);
   });
 
   /* ---------------------------------------------------------------- Touch -- */
@@ -980,11 +1417,12 @@ export function createGame(ctx) {
       holding: false,
       timer: 0,
     };
-    // Halten ohne Wischen = abbauen.
+    // Halten ohne Wischen = abbauen (bzw. weiter angreifen).
     look.timer = setTimeout(() => {
       if (touch.look === look && !look.moved) {
         look.holding = true;
         mouse.left = true;
+        attackTimer = 0;
       }
     }, 260);
     touch.look = look;
@@ -1006,9 +1444,10 @@ export function createGame(ctx) {
     touch.look = null;
     if (l.holding) mouse.left = false;
     else if (!l.moved && e.type === 'pointerup' && performance.now() - l.t < 300 && playing()) {
-      // Kurzes Tippen = setzen.
-      const t = aim(camera(1));
-      if (t) placeBlock(t);
+      // Kurzes Tippen: Wesen angreifen, sonst setzen/essen/benutzen.
+      const h = aim(camera(1));
+      if (h.mob) attack(h.mob);
+      else use(h, true);
     }
   };
   ctx.on(zoneLook, 'pointerup', endLook);
@@ -1059,9 +1498,11 @@ export function createGame(ctx) {
     if (next === mode) return;
     mode = next;
     player.flying = false;
-    health = Math.max(health, 1);
-    sel = Math.min(sel, 8);
+    eating = null;
+    breakProgress = 0;
+    if (player.health <= 0) player.health = 1;
     paintAll();
+    if (panelOpen) paintPanel();
     save();
   }
 
@@ -1080,17 +1521,44 @@ export function createGame(ctx) {
     if (!b) return;
     if (b.dataset.act === 'time') {
       time = time > 0 && time < 12000 ? 14000 : 1000;
+    } else if (b.dataset.act === 'monsters') {
+      monsters = !monsters;
+      if (!monsters) mobs.list = mobs.list.filter((m) => !m.species.hostile);
+      paintToolbar();
+      save();
     } else if (b.dataset.act === 'full') {
       if (document.fullscreenElement) document.exitFullscreen();
       else stage.requestFullscreen?.();
     } else if (b.dataset.act === 'new') {
-      if (!confirm('Eine neue Welt anlegen? Die bisherige Welt geht dabei verloren.')) return;
+      askNewWorld();
+    }
+  });
+
+  /** Neue Welt – mit Rueckfrage im Spiel selbst (Browser-Dialoge sind nicht ueberall erlaubt). */
+  function askNewWorld() {
+    overlay.hidden = false;
+    overlay.innerHTML = `<div class="big">Neue Welt anlegen?</div>
+      <div class="sub">Die bisherige Welt und dein Inventar gehen dabei verloren.</div>`;
+    const row = document.createElement('div');
+    row.className = 'bw-choice';
+    const yes = document.createElement('button');
+    yes.className = 'btn primary';
+    yes.textContent = 'Neue Welt';
+    yes.addEventListener('click', () => {
       for (const c of world.chunks.values()) renderer.freeChunk(c);
       startWorld(null);
       save();
       showPause();
-    }
-  });
+    });
+    const no = document.createElement('button');
+    no.className = 'btn';
+    no.textContent = 'Abbrechen';
+    no.addEventListener('click', showPause);
+    row.append(yes, no);
+    overlay.appendChild(row);
+    if (document.pointerLockElement) document.exitPointerLock();
+    setTouchPlay(false);
+  }
 
   /* ------------------------------------------------------------- Start -- */
 
@@ -1111,7 +1579,7 @@ export function createGame(ctx) {
     renderer.dispose();
   });
 
-  // Fuer Tests und Neugierige: Zugriff auf den Innenleben.
+  // Fuer Tests und Neugierige: Zugriff auf das Innenleben.
   stage.__bw = {
     get world() {
       return world;
@@ -1119,8 +1587,24 @@ export function createGame(ctx) {
     player,
     renderer,
     touch,
+    mobs,
+    entityBuf,
+    get inv() {
+      return inv;
+    },
     tick,
     camera,
+    give,
+    setMode,
+    spawnMob(kind, x, y, z) {
+      const m = new Mob(kind, x, y, z);
+      mobs.list.push(m);
+      return m;
+    },
+    select(i) {
+      sel = i;
+      paintHotbar();
+    },
     setPlay(on) {
       forcePlay = on;
       if (on) {
@@ -1129,7 +1613,10 @@ export function createGame(ctx) {
       }
     },
     get state() {
-      return { mode, time, health, sel, age };
+      return { mode, time, health: player.health, food: player.food, sel, age, fuel, monsters };
+    },
+    set time(t) {
+      time = t;
     },
   };
 }

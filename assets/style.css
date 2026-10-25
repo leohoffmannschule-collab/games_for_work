@@ -1112,29 +1112,49 @@ kbd {
   justify-items: center;
   gap: 6px;
 }
-.bw-hearts {
-  width: min(396px, 92%);
-  min-height: 18px;
+.bw-stats {
+  width: min(420px, 94%);
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  min-height: 2px;
+}
+.bw-stats[hidden] {
+  display: none;
+}
+.bw-row {
   display: flex;
   gap: 1px;
-  font-size: 18px;
-  line-height: 1;
 }
-.bw-hearts i {
-  font-style: normal;
-  text-shadow: 0 1px 2px #000;
+.bw-row.right {
+  flex-direction: row-reverse;
 }
-.bw-hearts .full {
-  color: #e53935;
+.bw-row img {
+  width: clamp(13px, 1.9vw, 17px);
+  height: auto;
+  image-rendering: pixelated;
+  filter: drop-shadow(0 1px 0 rgba(0, 0, 0, 0.5));
 }
-.bw-hearts .half {
-  background: linear-gradient(90deg, #e53935 50%, #4a1f1f 50%);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
+.bw-use {
+  position: absolute;
+  left: 50%;
+  top: calc(50% + 18px);
+  width: 46px;
+  height: 4px;
+  transform: translateX(-50%);
+  border-radius: 2px;
+  background: rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+  opacity: 0;
 }
-.bw-hearts .empty {
-  color: #4a1f1f;
+.bw-use.on {
+  opacity: 1;
+}
+.bw-use i {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: #fff;
 }
 .bw-hotbar {
   display: flex;
@@ -1169,6 +1189,17 @@ kbd {
   width: 78%;
   height: 78%;
 }
+.bw-dur {
+  position: absolute;
+  left: 10%;
+  bottom: 3px;
+  height: 2px;
+  border-radius: 1px;
+}
+.bw-slot.picked {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
 .bw-slot b {
   position: absolute;
   right: 3px;
@@ -1201,6 +1232,9 @@ kbd {
   border: 1px solid var(--border);
   box-shadow: var(--shadow);
   color: var(--text);
+}
+.bw-panel {
+  z-index: 5;
 }
 .bw-panel[hidden] {
   display: none;
@@ -1256,6 +1290,60 @@ kbd {
 }
 .bw-recipe .btn {
   margin-left: auto;
+}
+.bw-recipe.off {
+  opacity: 0.72;
+}
+.bw-ins {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.bw-plus,
+.bw-arrow {
+  color: var(--muted);
+}
+.bw-ing.missing {
+  color: var(--bad);
+}
+.bw-group {
+  margin: 14px 0 6px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--muted);
+}
+.bw-invgrid {
+  display: grid;
+  grid-template-columns: repeat(9, minmax(0, 46px));
+  gap: 4px;
+  justify-content: start;
+}
+.bw-invbar {
+  margin: 8px 0 14px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border);
+}
+.bw-panel .bw-slot {
+  width: 100%;
+  background: var(--surface-2);
+  border-color: var(--border);
+  color: var(--text);
+}
+.bw-panel .bw-slot b {
+  color: #fff;
+}
+.bw-panel-head .btn {
+  margin-left: auto;
+}
+.bw-panel-head .btn + .btn {
+  margin-left: 0;
+}
+.bw-choice {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
 }
 .bw-ing {
   display: inline-flex;
@@ -1407,7 +1495,10 @@ kbd {
   overscroll-behavior: none;
 }
 .bw-stage.immersive .bw-panel {
-  inset: 4% 3%;
+  inset: calc(max(10px, env(safe-area-inset-top, 0px)) + 48px) 3% 4%;
+}
+.bw-stage.immersive .bw-tmenu {
+  z-index: 6;
 }
 .bw-stage.touch .bw-cross {
   opacity: 0.8;
