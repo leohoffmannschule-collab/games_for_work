@@ -30,6 +30,9 @@ const icon = {
     <rect x="3" y="5.5" width="7" height="7" rx="1.6" transform="rotate(-18 6.5 9)" fill="currentColor" opacity=".22"/>
     <rect x="3" y="5.5" width="7" height="7" rx="1.6" transform="rotate(-18 6.5 9)"/>
     <path d="M13 19l2.6-5 2.6 5z"/><path d="M2.5 19h19" stroke-linecap="round"/></svg>`,
+  blockwelt: `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round">
+    <path d="M12 2.8 20 7.4v9.2L12 21.2 4 16.6V7.4z"/><path d="M12 12 4 7.4M12 12l8-4.6M12 12v9.2"/>
+    <path d="M12 2.8 20 7.4 12 12 4 7.4z" fill="currentColor" opacity=".22" stroke="none"/></svg>`,
 };
 
 /* ------------------------------------------------------------- Register -- */
@@ -113,6 +116,19 @@ const GAMES = [
       }
       const b = store.best('dash', 'aufwaermen');
       return b ? `Aufwärmen bis <strong>${b} %</strong>` : 'Noch nicht gelaufen';
+    },
+  },
+  {
+    id: 'blockwelt',
+    title: 'Blockwelt',
+    time: 'Frei',
+    icon: icon.blockwelt,
+    desc: 'Eine unendliche 3D-Welt aus Blöcken: erkunden, bauen, überleben. Mit Tag und Nacht, Höhlen und Meeren.',
+    load: () => import('./games/blockwelt.js'),
+    headline: () => {
+      const info = store.get('blockwelt:info');
+      if (!info) return 'Noch keine Welt';
+      return `Welt im <strong>${info.days + 1}.</strong> Tag`;
     },
   },
 ];
@@ -222,7 +238,7 @@ function renderHub() {
 
   view.innerHTML = `
     <section class="hero">
-      <h1>Sechs Spiele für die Pause</h1>
+      <h1>Sieben Spiele für die Pause</h1>
       <p>Kurz genug für den Kaffee, lang genug für den Kopf. Alles läuft im Browser,
          ohne Konto und ohne Netz – Punktestände bleiben nur auf diesem Gerät.</p>
     </section>
