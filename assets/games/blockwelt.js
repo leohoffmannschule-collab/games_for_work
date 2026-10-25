@@ -36,6 +36,8 @@ const SAVE_KEY = 'blockwelt';
 const MAX_STACK = 64;
 const TICK_MS = 1000 / TPS;
 const SENSITIVITY = 0.0022;
+const TOUCH_SENSITIVITY = 0.0055;
+const STICK_R = 52; // Joystick-Radius in Pixeln
 
 const MODES = { kreativ: 'Kreativ', ueberleben: 'Überleben' };
 const DISTANCES = { 4: 'Nah', 6: 'Mittel', 8: 'Weit' };
@@ -73,6 +75,21 @@ export function createGame(ctx) {
           <div class="bw-hotbar" id="hotbar"></div>
         </div>
         <div class="bw-toast" id="toast"></div>
+        <div class="bw-touch" id="touchUi">
+          <div class="bw-zone left" id="zoneMove">
+            <div class="bw-stick" id="stick"><i></i></div>
+          </div>
+          <div class="bw-zone right" id="zoneLook"></div>
+          <div class="bw-tbtns">
+            <button type="button" class="bw-tbtn" data-t="sneak">Ducken</button>
+            <button type="button" class="bw-tbtn big" data-t="jump">Sprung</button>
+          </div>
+          <div class="bw-tmenu">
+            <button type="button" class="bw-tbtn small only-creative" data-t="fly">Fliegen</button>
+            <button type="button" class="bw-tbtn small" data-t="inv">Inventar</button>
+            <button type="button" class="bw-tbtn small" data-t="pause">Pause</button>
+          </div>
+        </div>
       </div>
       <div class="bw-panel" id="panel" hidden></div>
       <div class="play-overlay bw-overlay" id="overlay"></div>
@@ -82,7 +99,11 @@ export function createGame(ctx) {
       (im Kreativmodus zweimal tippen = fliegen) · <kbd>Strg</kbd> sprinten ·
       <kbd>Shift</kbd> schleichen · linke Maustaste abbauen · rechte setzen ·
       Mittelklick nimmt den Block auf · <kbd>1</kbd>–<kbd>9</kbd> / Mausrad wählt ·
-      <kbd>E</kbd> Inventar · <kbd>F3</kbd> Debug. Maus und Tastatur nötig.
+      <kbd>E</kbd> Inventar · <kbd>F3</kbd> Debug.
+    </div>
+    <div class="keyhint bw-touchhint">
+      <strong>Am Handy:</strong> links wischen = gehen (ganz nach vorn = sprinten) · rechts wischen =
+      umschauen · kurz tippen = Block setzen · halten = abbauen · Leiste antippen wählt den Block.
     </div>`;
 
   const $ = (sel) => ctx.root.querySelector(sel);
@@ -109,7 +130,8 @@ export function createGame(ctx) {
 
   const saved = ctx.store.get(SAVE_KEY);
   let mode = saved && MODES[saved.mode] ? saved.mode : 'kreativ';
-  let renderDistance = saved && DISTANCES[saved.dist] ? saved.dist : 6;
+  const coarse = window.matchMedia('(pointer: coarse)').matches;
+  let renderDistance = saved && DISTANCES[saved.dist] ? saved.dist : coarse ? 4 : 6;
 
   const player = new Player();
   let world;
@@ -128,6 +150,8 @@ export function createGame(ctx) {
   const mouse = { left: false, right: false };
   let locked = false;
   let forcePlay = false; // fuer Tests ohne Pointer-Lock
+  // Touch-Steuerung: Joystick links, Umschauen rechts, dazu ein paar Knoepfe.
+  const touch = { on: false, play: false, move: null, look: null, jump: false, sneak: false };
   let panelOpen = false;
   let debugOn = false;
   let tapW = 0;
@@ -148,7 +172,7 @@ export function createGame(ctx) {
   let frames = 0;
   let fpsAt = 0;
 
-  const playing = () => (locked || forcePlay) && !panelOpen && !dead;
+  const playing = () => (locked || forcePlay || (touch.on && touch.play)) && !panelOpen && !dead;
   const creative = () => mode === 'kreativ';
   const slots = () => bars[mode];
 
@@ -394,6 +418,7 @@ export function createGame(ctx) {
     dead = true;
     mouse.left = mouse.right = false;
     if (document.pointerLockElement) document.exitPointerLock();
+    setTouchPlay(false);
     showOverlay('Du bist gestorben', 'Dein Inventar bleibt erhalten.', 'Wiederbeleben', respawn);
   }
 
@@ -421,6 +446,19 @@ export function createGame(ctx) {
       sneak: k('ShiftLeft') || k('ShiftRight'),
       sprint: k('ControlLeft') || sprintKey,
     };
+    if (touch.on) {
+      const m = touch.move;
+      if (m) {
+        const len = Math.hypot(m.dx, m.dy) / STICK_R;
+        if (len > 0.18) {
+          input.forward = Math.max(-1, Math.min(1, -m.dy / STICK_R));
+          input.strafe = Math.max(-1, Math.min(1, m.dx / STICK_R));
+          if (input.forward > 0.95) input.sprint = true;
+        }
+      }
+      if (touch.jump) input.jump = true;
+      if (touch.sneak) input.sneak = true;
+    }
     if (!playing()) {
       input.forward = input.strafe = 0;
       input.jump = input.sneak = false;
@@ -611,6 +649,7 @@ export function createGame(ctx) {
   }
 
   function paintToolbar() {
+    stage.classList.toggle('is-creative', creative());
     for (const b of ctx.root.querySelectorAll('[data-mode]')) {
       b.setAttribute('aria-pressed', String(b.dataset.mode === mode));
     }
@@ -658,10 +697,11 @@ export function createGame(ctx) {
     panel.hidden = !open;
     if (open) {
       mouse.left = mouse.right = false;
+      endTouches();
       if (document.pointerLockElement) document.exitPointerLock();
       paintPanel();
       overlay.hidden = true;
-    } else if (!locked && !forcePlay) {
+    } else if (!locked && !forcePlay && !(touch.on && touch.play)) {
       showPause();
     }
   }
@@ -686,15 +726,29 @@ export function createGame(ctx) {
     }
   }
 
+  /** Startet bzw. setzt fort: Touch geht direkt los, mit Maus braucht es den Pointer-Lock. */
+  function begin() {
+    if (touch.on) {
+      overlay.hidden = true;
+      hud.hidden = false;
+      setTouchPlay(true);
+      ctx.store.play('blockwelt');
+    } else {
+      lock();
+    }
+  }
+
   function showPause() {
     const first = age === 0;
     showOverlay(
       first ? 'Willkommen in der Blockwelt' : 'Pause',
       first
-        ? 'Klicken, dann Maus und Tastatur benutzen. Esc pausiert.'
-        : 'Klicken, um weiterzuspielen. Dein Fortschritt wird automatisch gespeichert.',
+        ? touch.on
+          ? 'Tippen, dann mit Daumen steuern. Links gehen, rechts umschauen.'
+          : 'Klicken, dann Maus und Tastatur benutzen. Esc pausiert.'
+        : 'Dein Fortschritt wird automatisch gespeichert.',
       first ? 'Spielen' : 'Weiter',
-      lock,
+      begin,
     );
   }
 
@@ -753,11 +807,7 @@ export function createGame(ctx) {
         if (e.timeStamp - tapW < 300) sprintKey = true;
         tapW = e.timeStamp;
       } else if (e.code === 'Space' && creative()) {
-        if (e.timeStamp - tapSpace < 300) {
-          player.flying = !player.flying;
-          player.vy = 0;
-          toast(player.flying ? 'Flugmodus an' : 'Flugmodus aus');
-        }
+        if (e.timeStamp - tapSpace < 300) toggleFly();
         tapSpace = e.timeStamp;
       }
     },
@@ -808,7 +858,7 @@ export function createGame(ctx) {
     { passive: false },
   );
 
-  ctx.on(hotbarEl, 'mousedown', (e) => {
+  ctx.on(hotbarEl, 'pointerdown', (e) => {
     const slot = e.target.closest('.bw-slot');
     if (!slot) return;
     sel = Number(slot.dataset.i);
@@ -831,6 +881,177 @@ export function createGame(ctx) {
       paintHotbar();
     }
   });
+
+  /* ---------------------------------------------------------------- Touch -- */
+
+  const zoneMove = $('#zoneMove');
+  const zoneLook = $('#zoneLook');
+  const stick = $('#stick');
+  const knob = stick.firstElementChild;
+
+  function setTouchMode(on) {
+    if (touch.on === on) return;
+    touch.on = on;
+    stage.classList.toggle('touch', on);
+    ctx.root.classList.toggle('bw-is-touch', on);
+    if (!on) setTouchPlay(false);
+  }
+
+  /** Im Touch-Modus fuellt das Spiel waehrend des Spielens den ganzen Bildschirm. */
+  function setTouchPlay(on) {
+    touch.play = on && touch.on;
+    stage.classList.toggle('immersive', touch.play);
+    if (touch.play) window.scrollTo(0, 0);
+    else endTouches();
+  }
+
+  function endTouches() {
+    if (touch.look) clearTimeout(touch.look.timer);
+    touch.move = touch.look = null;
+    touch.jump = touch.sneak = false;
+    mouse.left = false;
+    stick.classList.remove('on');
+    knob.style.transform = '';
+  }
+
+  function touchPause() {
+    save();
+    setTouchPlay(false);
+    showPause();
+  }
+
+  if (coarse) setTouchMode(true);
+  // Auch Laptops mit Touchscreen: der erste Fingerdruck schaltet um.
+  ctx.on(
+    stage,
+    'pointerdown',
+    (e) => {
+      if (e.pointerType === 'touch' && !touch.on) setTouchMode(true);
+    },
+    true,
+  );
+
+  ctx.on(zoneMove, 'pointerdown', (e) => {
+    if (!playing() || touch.move) return;
+    e.preventDefault();
+    zoneMove.setPointerCapture(e.pointerId);
+    const box = zoneMove.getBoundingClientRect();
+    touch.move = { id: e.pointerId, ox: e.clientX, oy: e.clientY, dx: 0, dy: 0 };
+    stick.style.left = e.clientX - box.left + 'px';
+    stick.style.top = e.clientY - box.top + 'px';
+    stick.classList.add('on');
+  });
+  ctx.on(zoneMove, 'pointermove', (e) => {
+    const m = touch.move;
+    if (!m || m.id !== e.pointerId) return;
+    let dx = e.clientX - m.ox;
+    let dy = e.clientY - m.oy;
+    const len = Math.hypot(dx, dy);
+    if (len > STICK_R) {
+      dx = (dx / len) * STICK_R;
+      dy = (dy / len) * STICK_R;
+    }
+    m.dx = dx;
+    m.dy = dy;
+    knob.style.transform = `translate(${dx}px, ${dy}px)`;
+  });
+  const endMove = (e) => {
+    if (touch.move && touch.move.id === e.pointerId) {
+      touch.move = null;
+      stick.classList.remove('on');
+      knob.style.transform = '';
+    }
+  };
+  ctx.on(zoneMove, 'pointerup', endMove);
+  ctx.on(zoneMove, 'pointercancel', endMove);
+
+  ctx.on(zoneLook, 'pointerdown', (e) => {
+    if (!playing() || touch.look) return;
+    e.preventDefault();
+    zoneLook.setPointerCapture(e.pointerId);
+    const look = {
+      id: e.pointerId,
+      x: e.clientX,
+      y: e.clientY,
+      sx: e.clientX,
+      sy: e.clientY,
+      t: performance.now(),
+      moved: false,
+      holding: false,
+      timer: 0,
+    };
+    // Halten ohne Wischen = abbauen.
+    look.timer = setTimeout(() => {
+      if (touch.look === look && !look.moved) {
+        look.holding = true;
+        mouse.left = true;
+      }
+    }, 260);
+    touch.look = look;
+  });
+  ctx.on(zoneLook, 'pointermove', (e) => {
+    const l = touch.look;
+    if (!l || l.id !== e.pointerId) return;
+    if (!l.moved && Math.hypot(e.clientX - l.sx, e.clientY - l.sy) > 12) l.moved = true;
+    player.yaw -= (e.clientX - l.x) * TOUCH_SENSITIVITY;
+    player.pitch -= (e.clientY - l.y) * TOUCH_SENSITIVITY;
+    player.pitch = Math.max(-Math.PI / 2 + 0.001, Math.min(Math.PI / 2 - 0.001, player.pitch));
+    l.x = e.clientX;
+    l.y = e.clientY;
+  });
+  const endLook = (e) => {
+    const l = touch.look;
+    if (!l || l.id !== e.pointerId) return;
+    clearTimeout(l.timer);
+    touch.look = null;
+    if (l.holding) mouse.left = false;
+    else if (!l.moved && e.type === 'pointerup' && performance.now() - l.t < 300 && playing()) {
+      // Kurzes Tippen = setzen.
+      const t = aim(camera(1));
+      if (t) placeBlock(t);
+    }
+  };
+  ctx.on(zoneLook, 'pointerup', endLook);
+  ctx.on(zoneLook, 'pointercancel', endLook);
+
+  const touchUi = $('#touchUi');
+  ctx.on(touchUi, 'pointerdown', (e) => {
+    const b = e.target.closest('[data-t]');
+    if (!b) return;
+    e.preventDefault();
+    const act = b.dataset.t;
+    if (act === 'jump') {
+      touch.jump = true;
+      // Zweimal schnell tippen = Flugmodus (Kreativ), wie bei der Leertaste.
+      if (creative() && e.timeStamp - tapSpace < 300) toggleFly();
+      tapSpace = e.timeStamp;
+    } else if (act === 'sneak') touch.sneak = true;
+    else if (act === 'fly') toggleFly();
+    else if (act === 'inv') setPanel(!panelOpen);
+    else if (act === 'pause') touchPause();
+  });
+  const releaseButtons = (e) => {
+    const b = e.target.closest && e.target.closest('[data-t]');
+    if (!b) return;
+    if (b.dataset.t === 'jump') touch.jump = false;
+    if (b.dataset.t === 'sneak') touch.sneak = false;
+  };
+  ctx.on(touchUi, 'pointerup', releaseButtons);
+  ctx.on(touchUi, 'pointercancel', releaseButtons);
+  ctx.on(touchUi, 'pointerout', releaseButtons);
+  ctx.on(touchUi, 'contextmenu', (e) => e.preventDefault());
+
+  // App-Wechsel oder gesperrter Bildschirm: automatisch pausieren.
+  ctx.on(document, 'visibilitychange', () => {
+    if (document.hidden && touch.play) touchPause();
+  });
+
+  function toggleFly() {
+    if (!creative()) return;
+    player.flying = !player.flying;
+    player.vy = 0;
+    toast(player.flying ? 'Flugmodus an' : 'Flugmodus aus');
+  }
 
   /* -------------------------------------------------------------- Toolbar -- */
 
@@ -897,6 +1118,7 @@ export function createGame(ctx) {
     },
     player,
     renderer,
+    touch,
     tick,
     camera,
     setPlay(on) {

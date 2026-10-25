@@ -87,8 +87,8 @@ einen Eintrag in der `GAMES`-Liste in `assets/app.js` ergänzen.
 ## Blockwelt
 
 Ein eigener 3D-Sandkasten mit eigenem WebGL2-Renderer – ohne Bibliotheken, ohne
-Bilddateien (alle Texturen werden beim Start gezeichnet). Er braucht Maus und
-Tastatur und ein Gerät mit WebGL 2.
+Bilddateien (alle Texturen werden beim Start gezeichnet). Er läuft mit Maus und
+Tastatur oder per Touch am Handy und braucht WebGL 2.
 
 - **Welt**: unendlich, aus einer Zahl (Seed) erzeugt – Meere, Strände, Wiesen, Wälder,
   Wüsten, schneebedeckte Gipfel, Höhlen und Bäume. Nur deine Änderungen werden im
@@ -98,7 +98,10 @@ Tastatur und ein Gerät mit WebGL 2.
 - **Überleben**: Abbauen dauert je nach Härte, Blöcke landen in der Leiste, Sturzschaden,
   Herzen, Herstellen von Brettern, Glas, Ziegeln und Lampen über `E`.
 - **Tag und Nacht**: 20 Minuten pro Tag, Sonne, Mond, Sterne, dunkle Höhlen.
-- **Steuerung**: `WASD`, Leertaste, `Strg` (oder `W` doppelt) sprinten, `Shift` schleichen
+- **Handy**: Links wischen = gehen (ganz nach vorn = sprinten), rechts wischen = umschauen,
+  kurz tippen = Block setzen, halten = abbauen. Knöpfe für Sprung, Ducken, Fliegen,
+  Inventar und Pause; beim Spielen füllt das Spiel den ganzen Bildschirm.
+- **Steuerung am Rechner**: `WASD`, Leertaste, `Strg` (oder `W` doppelt) sprinten, `Shift` schleichen
   (bleibt an Kanten stehen), linke Taste abbauen, rechte setzen, `F3` zeigt Debug-Werte.
 
 ### Reverse Engineering – was damit gemeint ist
@@ -123,7 +126,7 @@ render.js   WebGL2: Gelände, Wasser, Himmel, Sonne/Mond/Sterne, Blockumriss
 atlas.js    Prozedural gezeichneter Texturatlas und Block-Symbole
 ```
 
-Noch nicht enthalten: Wasserfluss, Mobs, Werkzeuge, Fackellicht, Redstone, Touch-Bedienung.
+Noch nicht enthalten: Wasserfluss, Mobs, Werkzeuge, Fackellicht, Redstone.
 
 ## Strecken prüfen
 
