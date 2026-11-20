@@ -90,7 +90,10 @@ button { font-family: var(--font); }
 .track-card .name { font-weight: 900; font-style: italic; font-size: 18px; text-transform: uppercase; }
 .track-card .meta { font-size: 12px; color: var(--muted); line-height: 1.45; }
 .track-card .price { margin-top: auto; font-size: 13px; font-weight: 700; color: var(--gold); }
-.track-card .lock { position: absolute; inset: 0; background: rgba(6,4,14,0.62); display: grid; place-items: center; text-align: center; font-weight: 800; letter-spacing: 1px; padding: 10px; }
+.track-card .lock { position: absolute; left: 0; right: 0; top: 0; height: 120px; background: rgba(6,4,14,0.72); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; text-align: center; font-size: 12px; font-weight: 600; color: #d8d2f0; padding: 8px 12px; }
+.track-card .lock .ico { font-size: 22px; }
+.track-card .lock b { font-size: 14px; color: var(--gold); letter-spacing: 0.5px; }
+.track-card.locked .info { opacity: 0.6; }
 .row { display: flex; gap: 10px; align-items: center; }
 .row.end { justify-content: flex-end; margin-top: 18px; }
 
@@ -597,7 +600,7 @@ function defaultSave() {
     },
     tracks: { unlocked: [true, true, false, false, false], best: {}, wins: {} },
     records: { traps: {}, stunt: 0, escape: 0 },
-    world: { pos: null, heading: 0, hours: 16.5 },
+    world: { pos: null, heading: 0, hours: 17.8 },
     settings: {
       quality: 'high',
       autoRes: true,
@@ -2406,8 +2409,8 @@ function makeFacadeMaterial() {
             vec3 lightC = roomLightColor( rh2 ) * flick;
             float ambientRoom = 0.05 + 0.12 * ( 1.0 - uNight );
             float blind = step( 0.72, rh2 ) * step( 1.0 - fract( rh * 7.0 ) * 0.6, ( f.y - my0 ) / ( my1 - my0 ) );
-            vec3 interior = roomCol * ( ambientRoom + lit * lightC * 1.6 );
-            interior = mix( interior, vec3( 0.8, 0.75, 0.65 ) * ( ambientRoom + lit * 1.2 ), blind );
+            vec3 interior = roomCol * ( ambientRoom + lit * lightC * 1.15 );
+            interior = mix( interior, vec3( 0.8, 0.75, 0.65 ) * ( ambientRoom + lit * 0.85 ), blind );
             if ( shop > 0.5 ) interior *= 1.0 + uNight * 1.5;
             base = mix( interior * 0.35, glassCol, glassMetal * 0.6 );
             facEmissive = interior * ( 0.3 + 0.7 * uNight ) * ( 1.0 - glassMetal * 0.45 );
@@ -2672,8 +2675,8 @@ function buildExtraMaterials() {
 // Nacht-abhängige Leuchtmaterialien aktualisieren
 function updateNightMaterials(night, hours) {
   const k = night;
-  MAT.lampGlow.color.setRGB(1, 0.86, 0.6).multiplyScalar(0.25 + k * 9);
-  MAT.lampPool.opacity = k * 0.55;
+  MAT.lampGlow.color.setRGB(1, 0.86, 0.6).multiplyScalar(0.25 + k * 5.5);
+  MAT.lampPool.opacity = k * 0.4;
   MAT.carPool.opacity = k * 0.5;
   for (const m of Object.values(MAT.neon)) m.color.copy(m.userData.base).multiplyScalar(0.55 + k * 5.5);
   MAT.redLight.color.setRGB(1, 0.05, 0.02).multiplyScalar(0.6 + k * 4 * (0.5 + 0.5 * Math.sin(hours * 3600 * 2.2)));
@@ -2723,10 +2726,12 @@ const FinalShader = {
     uRes: { value: new THREE.Vector2(1920, 1080) },
     uFade: { value: 0 },
     uWarm: { value: 0 },
+    uSat: { value: 0.16 },
+    uContrast: { value: 0.22 },
   },
   vertexShader: /* glsl */ `varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 ); }`,
   fragmentShader: /* glsl */ `
-    uniform sampler2D tDiffuse; uniform float uTime, uSpeed, uNitro, uSlow, uDamage, uFlash, uVig, uGrain, uAspect, uFade, uWarm; uniform vec2 uRes;
+    uniform sampler2D tDiffuse; uniform float uTime, uSpeed, uNitro, uSlow, uDamage, uFlash, uVig, uGrain, uAspect, uFade, uWarm, uSat, uContrast; uniform vec2 uRes;
     varying vec2 vUv;
     void main() {
       vec2 c = vUv - 0.5;
@@ -2742,6 +2747,11 @@ const FinalShader = {
         col.b += texture2D( tDiffuse, suv - c * ca ).b;
       }
       col /= 6.0;
+      // Farbkorrektur: etwas mehr Sättigung und eine sanfte S-Kurve für Kontrast
+      col = clamp( col, 0.0, 1.0 );
+      float l0 = dot( col, vec3( 0.2126, 0.7152, 0.0722 ) );
+      col = clamp( mix( vec3( l0 ), col, 1.0 + uSat ), 0.0, 1.0 );
+      col = mix( col, col * col * ( 3.0 - 2.0 * col ), uContrast );
       // Zeitlupe: entsättigt, kühler Ton
       float l = dot( col, vec3( 0.299, 0.587, 0.114 ) );
       col = mix( col, vec3( l ) * vec3( 0.86, 0.97, 1.12 ), uSlow * 0.55 );
@@ -2888,8 +2898,8 @@ const TOD_KEYS = [
   { e: -6, sunCol: [0.9, 0.5, 0.45], sunI: 0.0, moonI: 0.18, hemiSky: [0.12, 0.1, 0.22], hemiGnd: [0.1, 0.06, 0.06], hemiI: 0.55, fog: [0.12, 0.075, 0.13], exp: 0.95, turb: 8, ray: 3.5, cLit: [0.4, 0.18, 0.26], cDark: [0.05, 0.04, 0.08], nTop: [0.01, 0.012, 0.045], nHor: [0.28, 0.11, 0.16], envI: 0.95, bloom: 0.5, fogSun: 0.45, warm: 0.3 },
   { e: 0, sunCol: [1.0, 0.42, 0.26], sunI: 1.0, moonI: 0, hemiSky: [0.45, 0.33, 0.48], hemiGnd: [0.25, 0.15, 0.12], hemiI: 0.45, fog: [0.86, 0.47, 0.4], exp: 0.72, turb: 10, ray: 3.2, cLit: [1.7, 0.7, 0.55], cDark: [0.25, 0.14, 0.22], nTop: [0, 0, 0], nHor: [0, 0, 0], envI: 1.0, bloom: 0.42, fogSun: 0.95, warm: 0.6 },
   { e: 6, sunCol: [1.0, 0.64, 0.4], sunI: 2.2, moonI: 0, hemiSky: [0.55, 0.53, 0.68], hemiGnd: [0.3, 0.23, 0.17], hemiI: 0.4, fog: [0.92, 0.7, 0.55], exp: 0.6, turb: 7, ray: 2.2, cLit: [2.3, 1.5, 1.05], cDark: [0.35, 0.3, 0.36], nTop: [0, 0, 0], nHor: [0, 0, 0], envI: 1.0, bloom: 0.36, fogSun: 0.75, warm: 0.45 },
-  { e: 18, sunCol: [1.0, 0.86, 0.7], sunI: 3.6, moonI: 0, hemiSky: [0.5, 0.62, 0.9], hemiGnd: [0.32, 0.28, 0.22], hemiI: 0.3, fog: [0.6, 0.69, 0.84], exp: 0.5, turb: 3.4, ray: 2.0, cLit: [2.7, 2.45, 2.25], cDark: [0.5, 0.52, 0.6], nTop: [0, 0, 0], nHor: [0, 0, 0], envI: 0.8, bloom: 0.3, fogSun: 0.45, warm: 0.15 },
-  { e: 55, sunCol: [1.0, 0.96, 0.9], sunI: 4.0, moonI: 0, hemiSky: [0.5, 0.64, 0.95], hemiGnd: [0.34, 0.3, 0.25], hemiI: 0.26, fog: [0.56, 0.67, 0.84], exp: 0.46, turb: 2.5, ray: 2.2, cLit: [2.9, 2.85, 2.8], cDark: [0.6, 0.64, 0.72], nTop: [0, 0, 0], nHor: [0, 0, 0], envI: 0.72, bloom: 0.28, fogSun: 0.3, warm: 0 },
+  { e: 18, sunCol: [1.0, 0.8, 0.58], sunI: 3.7, moonI: 0, hemiSky: [0.46, 0.6, 0.92], hemiGnd: [0.34, 0.27, 0.2], hemiI: 0.3, fog: [0.5, 0.6, 0.78], exp: 0.5, turb: 3.4, ray: 2.0, cLit: [2.7, 2.45, 2.25], cDark: [0.5, 0.52, 0.6], nTop: [0, 0, 0], nHor: [0, 0, 0], envI: 0.8, bloom: 0.3, fogSun: 0.45, warm: 0.15 },
+  { e: 55, sunCol: [1.0, 0.92, 0.8], sunI: 4.0, moonI: 0, hemiSky: [0.44, 0.6, 0.95], hemiGnd: [0.36, 0.3, 0.24], hemiI: 0.26, fog: [0.46, 0.6, 0.82], exp: 0.46, turb: 2.5, ray: 2.2, cLit: [2.9, 2.85, 2.8], cDark: [0.6, 0.64, 0.72], nTop: [0, 0, 0], nHor: [0, 0, 0], envI: 0.72, bloom: 0.28, fogSun: 0.3, warm: 0 },
 ];
 
 function sampleTOD(elev) {
@@ -3340,8 +3350,8 @@ class Atmosphere {
     ou.uFogCol.value.copy(this.fog.color);
     ou.uHaze.value = clamp(P.haze + rain * 0.4 + this.fog.density * 250, 0, 1);
     ou.uFlash.value = flashK;
-    ou.uDayTint.value = 0.55 * smoothstep(4, 25, elev) * (1 - overcast) * (1 - rain);
-    ou.uZenith.value.setRGB(0.12, 0.34, 0.88).multiplyScalar(0.9);
+    ou.uDayTint.value = 0.72 * smoothstep(4, 25, elev) * (1 - overcast) * (1 - rain);
+    ou.uZenith.value.setRGB(0.09, 0.3, 0.86).multiplyScalar(0.92);
     if (camera) this.overlay.position.copy(camera.position);
     // Belichtung & Bloom
     this.renderer.toneMappingExposure = T.exp * (1 + rain * 0.15) * (extra.exposureMul || 1);
@@ -9419,7 +9429,7 @@ class CarVisual {
     if (this.spots) for (const s of this.spots) s.intensity = on && headK > 0 ? 1600 : 0;
     // Rückleuchten / Bremslicht
     if (this.tailMat) {
-      const k = this.brake ? 5 : on ? 2 : 0.16;
+      const k = this.brake ? 4.5 : on ? 1.5 : 0.16;
       this.tailMat.color.setRGB(k, k * 0.03, k * 0.02);
     }
     if (this.brakeGlow) this.brakeGlow.intensity = this.brake ? 3 : on ? 0.6 : 0;
@@ -9529,7 +9539,7 @@ class Vehicle {
     this.quat = new THREE.Quaternion();
     this.vel = new THREE.Vector3();
     this.angVel = new THREE.Vector3();
-    this.in = { throttle: 0, brake: 0, steer: 0, handbrake: false, nitro: false, shiftUp: false, shiftDown: false };
+    this.in = { throttle: 0, brake: 0, steer: 0, handbrake: false, nitro: false, shiftUp: false, shiftDown: false, hold: false };
     this.ai = !!opts.ai;
     this.assist = opts.assist !== false;
     this.up = { engine: 0, turbo: 0, tires: 0, nitro: 0, exhaust: 0 };
@@ -9630,6 +9640,7 @@ class Vehicle {
     return Math.atan2(-f.x, -f.z);
   }
   reset(x, y, z, heading) {
+    this.resetSerial = (this.resetSerial || 0) + 1;
     this.pos.set(x, y, z);
     this.quat.setFromEuler(_e1.set(0, heading, 0));
     this.vel.set(0, 0, 0);
@@ -9669,6 +9680,7 @@ class Vehicle {
   }
   // Eingaben einmal pro Frame aufbereiten (Lenkung, Gang, Rückwärts)
   prepare(dt, world) {
+    if (!(dt > 1e-5)) return;
     const ph = this.ph;
     const inp = this.in;
     _fwd.set(0, 0, -1).applyQuaternion(this.quat);
@@ -9696,9 +9708,10 @@ class Vehicle {
     this.steerAngle = clamp(delta, -0.65, 0.65);
     // Gang / Rückwärts
     let throttle = inp.throttle;
-    let brake = inp.brake;
+    // hold: Startaufstellung – Bremsen halten den Wagen, kein Wechsel in den Rückwärtsgang
+    let brake = inp.hold ? 1 : inp.brake;
     if (this.gear >= 1) {
-      if (brake > 0.3 && throttle < 0.1 && vLong < 0.6 && this.onGround) {
+      if (brake > 0.3 && throttle < 0.1 && vLong < 0.6 && this.onGround && !inp.hold) {
         this.gear = -1;
       }
     } else if (this.gear === -1) {
@@ -9728,6 +9741,7 @@ class Vehicle {
     if (Math.random() < this.popChance) this.emit('pop', { n: 1 + Math.floor(Math.random() * 2) });
   }
   step(h, world) {
+    if (!(h > 1e-5)) return;
     const ph = this.ph;
     const t = this.t;
     const q = this.quat;
@@ -9857,7 +9871,8 @@ class Vehicle {
       } else {
         contacts++;
         let comp = w.L0 - Lsus;
-        const cv = (comp - w.compPrev) / h;
+        // Einfederungsgeschwindigkeit (begrenzt: robust gegen sehr kleine Zeitschritte)
+        const cv = clamp((comp - w.compPrev) / h, -12, 12);
         w.compPrev = comp;
         let Fs = w.k * comp + (cv > 0 ? w.c : w.c * 1.2) * cv;
         if (comp > w.travel) {
@@ -11696,7 +11711,7 @@ class TrafficSystem {
     for (let i = this.cars.length - 1; i >= 0; i--) {
       const c = this.cars[i];
       const d = Math.hypot(c.body.pos.x - px, c.body.pos.z - pz);
-      if (d > 560 || (c.state === 'wreck' && d > 260 && c.timer > 20)) {
+      if (!Number.isFinite(d) || d > 560 || (c.state === 'wreck' && d > 260 && c.timer > 20)) {
         if (c.lane) c.lane.cars.splice(c.lane.cars.indexOf(c), 1);
         this.cars.splice(i, 1);
         this.recycle(c);
@@ -12605,6 +12620,7 @@ class RaceManager {
     this.state = 'idle';
   }
   cleanup() {
+    if (this.game.player) this.game.player.in.hold = false;
     for (const r of this.racers) {
       if (!r.isPlayer) {
         r.visual.dispose();
@@ -12624,8 +12640,7 @@ class RaceManager {
     if (this.state === 'countdown') {
       this.countdown -= dt;
       for (const r of this.racers) {
-        r.veh.in.brake = 1;
-        r.veh.in.handbrake = true;
+        r.veh.in.hold = true;
         if (!r.isPlayer) {
           r.veh.in.throttle = 0.3 + Math.random() * 0.4;
           r.veh.in.steer = 0;
@@ -12638,7 +12653,7 @@ class RaceManager {
         this.state = 'race';
         this.raceStart = this.t;
         for (const r of this.racers) {
-          r.veh.in.handbrake = false;
+          r.veh.in.hold = false;
           r.veh.in.brake = 0;
           r.lapStart = this.t;
         }
@@ -12791,8 +12806,13 @@ class Activities {
         if (kmh > 170 && g.police) g.police.crime(kmh > 230 ? 14 : 6, P.pos, false);
       }
     }
-    // Stuntsprünge (Schanzen oder Kuppen)
-    if (!P.onGround) {
+    // Stuntsprünge (Schanzen oder Kuppen); nicht als Wrack oder nach einem Teleport
+    if (P.disabled || P.resetSerial !== this.stuntSerial) {
+      if (this.stunt && this.stunt.slow) Bus.emit('stuntLand', null);
+      this.stunt = null;
+      this.stuntSerial = P.resetSerial;
+    }
+    if (!P.onGround && !P.disabled) {
       if (!this.stunt && P.kmh > 45) {
         const fromRamp = P.wheels.some((w) => w.surf === SURF.metal) || P.lastGroundSurf === SURF.metal;
         this.stunt = { x: P.pos.x, z: P.pos.z, y: P.pos.y, t: 0, ramp: fromRamp, roll: 0, maxH: P.pos.y, slow: false };
@@ -12812,7 +12832,7 @@ class Activities {
       this.stunt = null;
       const dist = Math.hypot(P.pos.x - s.x, P.pos.z - s.z);
       const upright = _v1.set(0, 1, 0).applyQuaternion(P.quat).y > 0.6;
-      if (s.t > 0.75 && dist > 12) {
+      if (s.t > 0.75 && dist > 12 && dist < 400) {
         const flips = Math.floor(s.roll / (TAU * 0.85));
         const bonus = upright ? Math.round(dist * 22 + s.t * 350 + flips * 1500 + (s.maxH - s.y) * 30) : 0;
         if (bonus > 0) {
@@ -14154,7 +14174,7 @@ class GarageScene {
     const ceil = new THREE.Mesh(new THREE.CircleGeometry(30, 48).rotateX(Math.PI / 2).translate(0, 14, 0), new THREE.MeshStandardMaterial({ color: 0x0c0c10, roughness: 0.9 }));
     this.scene.add(ceil);
     // Leuchtstreifen (Neon) an der Decke und Wand
-    const strip = new THREE.MeshBasicMaterial({ color: new THREE.Color(4, 4, 4.4) });
+    const strip = new THREE.MeshBasicMaterial({ color: new THREE.Color(2.6, 2.6, 2.9) });
     for (let k = 0; k < 6; k++) {
       const g = new THREE.BoxGeometry(14, 0.12, 0.4);
       const m = new THREE.Mesh(g, strip);
@@ -14165,7 +14185,8 @@ class GarageScene {
     ring.position.y = 2.2;
     this.scene.add(ring);
     // Drehplattform
-    const disc = new THREE.Mesh(new THREE.CylinderGeometry(4.2, 4.3, 0.18, 64), new THREE.MeshStandardMaterial({ color: 0x2b2d31, roughness: 0.25, metalness: 0.8, normalMap: TEX.lib.brushed.normalMap }));
+    // Drehteller: dunkles Epoxid mit feinem Schliff (schwache Normalen gegen streifige Spiegelungen)
+    const disc = new THREE.Mesh(new THREE.CylinderGeometry(4.2, 4.3, 0.18, 64), new THREE.MeshStandardMaterial({ color: 0x1d1e23, roughness: 0.3, metalness: 0.35, normalMap: TEX.lib.brushed.normalMap, normalScale: new THREE.Vector2(0.12, 0.12) }));
     disc.position.y = 0.09;
     disc.receiveShadow = true;
     this.scene.add(disc);
@@ -14183,14 +14204,14 @@ class GarageScene {
     key.shadow.mapSize.set(2048, 2048);
     key.shadow.bias = -0.0002;
     this.scene.add(key, key.target);
-    const rimL = new THREE.SpotLight(0xff66cc, 300, 40, 0.7, 0.8, 1.5);
+    const rimL = new THREE.SpotLight(0xff66cc, 150, 40, 0.7, 0.8, 1.5);
     rimL.position.set(-8, 6, -6);
     this.scene.add(rimL, rimL.target);
-    const fill = new THREE.SpotLight(0x66ccff, 260, 40, 0.7, 0.8, 1.5);
+    const fill = new THREE.SpotLight(0x66ccff, 150, 40, 0.7, 0.8, 1.5);
     fill.position.set(8, 5, -7);
     this.scene.add(fill, fill.target);
     this.scene.add(new THREE.HemisphereLight(0x8899aa, 0x222222, 0.4));
-    this.camYaw = 0.7;
+    this.camYaw = 2.45;
     this.camPitch = 0.22;
     this.camDist = 8.2;
     this.autoRot = true;
@@ -14612,7 +14633,7 @@ class Game {
     this.scene = new THREE.Scene();
     this.atm = new Atmosphere(rs);
     this.atm.attach(this.scene);
-    this.atm.hours = S.world.hours || 16.5;
+    this.atm.hours = S.world.hours || 17.8;
     this.atm.timeSpeed = S.settings.timeSpeed;
     this.fx = new Effects(this.scene);
     this.hud = new HUD(this);
@@ -14728,10 +14749,15 @@ class Game {
     }
     this.useWorld(this.openWorld);
     const S = Save.data;
-    this.atm.setPreset({ fogDensity: 0.00024, fogFalloff: 0.006, haze: 0.18, timeFlow: S.settings.timeSpeed > 0, weather: S.settings.weather });
-    this.atm.hours = S.world.hours || 16.5;
+    this.atm.setPreset({ fogDensity: 0.0002, fogFalloff: 0.006, haze: 0.1, timeFlow: S.settings.timeSpeed > 0, weather: S.settings.weather });
+    this.atm.hours = S.world.hours || 17.8;
     this.atm.weather.mode = S.settings.weather === 'auto' ? 'auto' : 'fixed';
     if (S.settings.weather !== 'auto') this.atm.forceWeather(S.settings.weather);
+    else {
+      // wechselndes Wetter: sonnig beginnen, erster Wechsel nach einigen Minuten
+      this.atm.forceWeather('clear');
+      this.atm.weather.timer = 150 + Math.random() * 150;
+    }
     this.atm.snapWeather();
     this.traffic.attach(this.world, this.scene);
     this.traffic.enabled = true;
@@ -14793,6 +14819,7 @@ class Game {
   useWorld(w) {
     if (this.world && this.world !== w) this.world.root.removeFromParent();
     this.world = w;
+    this.lastNightK = -1;
     this.scene.add(w.root);
     this.rs.setScene(this.scene);
     this.scene.add(this.playerVisual.root);
@@ -15174,7 +15201,7 @@ class Game {
       if (!unlocked) {
         const lock = document.createElement('div');
         lock.className = 'lock';
-        lock.innerHTML = `🔒<br>Sieg auf der vorherigen Strecke<br>oder freischalten für ${fmtMoney(t.price)}`;
+        lock.innerHTML = `<span class="ico">🔒</span><span>Sieg auf der vorherigen Strecke oder</span><b>Freischalten für ${fmtMoney(t.price)}</b>`;
         card.appendChild(lock);
         card.addEventListener('click', () => {
           if (S.money >= t.price) {
@@ -15520,6 +15547,7 @@ class Game {
     this.world.wetness = SHARED.wet.value;
     this.world.update(this.rs.camera, dt);
     this.traffic.render(this.rs.camera.position);
+    this.updateWorldNight();
     this.updateLights();
     this.updateAudio(dt, real);
     // HUD
@@ -15559,6 +15587,8 @@ class Game {
     const vehs = [P];
     for (const u of this.police.units) vehs.push(u.veh);
     for (const r of this.race.racers) if (!r.isPlayer) vehs.push(r.veh);
+    // sehr kleine Zeitschritte überspringen (z. B. zwei Frames mit fast gleichem Zeitstempel)
+    if (!(dt > 2e-4)) return;
     for (const v of vehs) {
       v.prepare(dt, ctx);
       v.scrapeAudio = 0;
@@ -15580,7 +15610,9 @@ class Game {
         }
       }
     }
-    if (dt > 0) this.acc.copy(P.vel).sub(this.lastVel).multiplyScalar(1 / dt);
+    // Sicherheitsnetz: ungültige Zustände sofort auf die letzte gültige Lage zurücksetzen
+    for (const v of vehs) this.sanitize(v);
+    this.acc.copy(P.vel).sub(this.lastVel).multiplyScalar(1 / dt);
     // Kollisionsereignisse zusammenfassen (stärkstes pro Körperpaar)
     const seen = new Map();
     for (const ev of events) {
@@ -15595,6 +15627,20 @@ class Game {
       for (const e of v.events) this.vehicleEvent(v, e);
       v.events.length = 0;
     }
+  }
+  sanitize(v) {
+    const ok = Number.isFinite(v.pos.x + v.pos.y + v.pos.z + v.vel.x + v.vel.y + v.vel.z + v.angVel.x + v.angVel.y + v.angVel.z + v.quat.x + v.quat.y + v.quat.z + v.quat.w + v.rpm);
+    if (ok) {
+      if (!v.safe) v.safe = { pos: new THREE.Vector3(), heading: 0 };
+      v.safe.pos.copy(v.pos);
+      v.safe.heading = v.heading();
+      return;
+    }
+    console.warn('Ungültiger Fahrzeugzustand – wird zurückgesetzt');
+    const s = v.safe || { pos: _v1.set(this.world.spawn.x, 0, this.world.spawn.z), heading: this.world.spawn.heading };
+    const gy = this.world.ground.heightAt(s.pos.x, s.pos.z, s.pos.y + 20);
+    v.reset(s.pos.x, gy + v.restHeight() + 0.2, s.pos.z, s.heading);
+    for (const w of v.wheels) w.omega = 0;
   }
   bodyInfo(b) {
     if (b === this.player) return { kind: 'player', dmg: this.dmg };
@@ -15765,6 +15811,14 @@ class Game {
     const p = this.player.pos;
     return t && Math.abs(p.x - t.x) < 10 && p.z > t.z0 && p.z < t.z1 && p.y < -1;
   }
+  // Leuchtreklamen und Werbetafeln je nach Tageszeit
+  updateWorldNight() {
+    const night = SHARED.night.value;
+    if (Math.abs(night - this.lastNightK) < 0.01) return;
+    this.lastNightK = night;
+    for (const m of this.world.signMats || []) m.color.copy(m.userData.base).multiplyScalar(0.6 + night * 3.2);
+    for (const m of this.world.nightMats || []) m.emissiveIntensity = 0.22 + night * 1.1;
+  }
   updateLights() {
     const night = SHARED.night.value;
     const cam = this.rs.camera.position;
@@ -15785,7 +15839,7 @@ class Game {
       const lamp = near[i];
       if (lamp && i < n && (night > 0.1 || lamp.tunnel)) {
         l.position.set(lamp.x, lamp.y - 0.3, lamp.z);
-        l.intensity = (lamp.tunnel ? 160 : 260) * Math.max(night, lamp.tunnel ? 1 : 0);
+        l.intensity = (lamp.tunnel ? 120 : 130) * Math.max(night, lamp.tunnel ? 1 : 0);
       } else l.intensity = 0;
     });
     // Blaulicht der nächsten Streife
