@@ -2675,8 +2675,8 @@ function buildExtraMaterials() {
 // Nacht-abhängige Leuchtmaterialien aktualisieren
 function updateNightMaterials(night, hours) {
   const k = night;
-  MAT.lampGlow.color.setRGB(1, 0.86, 0.6).multiplyScalar(0.25 + k * 5.5);
-  MAT.lampPool.opacity = k * 0.4;
+  MAT.lampGlow.color.setRGB(1, 0.86, 0.6).multiplyScalar(0.25 + k * 4);
+  MAT.lampPool.opacity = k * 0.26;
   MAT.carPool.opacity = k * 0.5;
   for (const m of Object.values(MAT.neon)) m.color.copy(m.userData.base).multiplyScalar(0.55 + k * 5.5);
   MAT.redLight.color.setRGB(1, 0.05, 0.02).multiplyScalar(0.6 + k * 4 * (0.5 + 0.5 * Math.sin(hours * 3600 * 2.2)));
@@ -5009,6 +5009,35 @@ function makeColumnMaterial(color) {
   return new THREE.MeshBasicMaterial({ map: makeTex(c, { clamp: true }), color: new THREE.Color(color).multiplyScalar(2), transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
 }
 
+// Lichtkegel-Material: Helligkeit wächst mit der durchquerten Kegeldicke (Blick senkrecht zur Oberfläche),
+// läuft an Spitze und Boden weich aus
+function makeBeamMaterial(color) {
+  return new THREE.ShaderMaterial({
+    uniforms: { uColor: { value: color }, uOpacity: { value: 0.2 } },
+    vertexShader: /* glsl */ `
+      varying vec3 vN; varying vec3 vV; varying float vH;
+      void main() {
+        vec4 wp = modelMatrix * vec4( position, 1.0 );
+        vN = normalize( mat3( modelMatrix ) * normal );
+        vV = normalize( cameraPosition - wp.xyz );
+        vH = uv.y;
+        gl_Position = projectionMatrix * viewMatrix * wp;
+      }`,
+    fragmentShader: /* glsl */ `
+      uniform vec3 uColor; uniform float uOpacity;
+      varying vec3 vN; varying vec3 vV; varying float vH;
+      void main() {
+        float facing = pow( abs( dot( normalize( vN ), normalize( vV ) ) ), 2.0 );
+        float along = smoothstep( 1.0, 0.82, vH ) * smoothstep( 0.0, 0.25, vH );
+        gl_FragColor = vec4( uColor * facing * along * uOpacity, 1.0 );
+      }`,
+    transparent: true,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    side: THREE.FrontSide,
+  });
+}
+
 function gantryGeometry(width) {
   const parts = [];
   for (const s of [-1, 1]) {
@@ -5909,7 +5938,8 @@ class OpenWorld extends World {
           for (let i = 0; i < n - 1; i++) {
             const x0 = hf.vx(i);
             const z0 = hf.vz(j);
-            if (x0 + 8 > T.x - 11 && x0 < T.x + 11 && z0 + 8 > T.z0 - 4 && z0 < T.z1 + 4) {
+            // Aussparung über Tunnel und beiden Rampen (Rampen beginnen 40 m vor den Portalen)
+            if (x0 + 8 > T.x - 11 && x0 < T.x + 11 && z0 + 8 > T.z0 - 40 && z0 < T.z1 + 40) {
               hf.hole[j * (n - 1) + i] = 1;
               for (const [di, dj] of [[0, 0], [1, 0], [0, 1], [1, 1]]) hf.h[(j + dj) * n + i + di] = Math.min(hf.h[(j + dj) * n + i + di], -9);
             }
@@ -6080,7 +6110,7 @@ class OpenWorld extends World {
       };
       const pts = linePts(T.x, -1060, T.x, -660, (x, z) => yAt(z), 4);
       this.tunnelPts = pts;
-      this.addRoad(pts, { type: 'city4', trimStart: 13, trimEnd: 13, flatten: false, lamps: null });
+      this.addRoad(pts, { type: 'city4', trimStart: 8, trimEnd: 8, flatten: false, lamps: null });
       cityEdge(gridNode[T.x + ',-1060'], gridNode[T.x + ',-660'], pts);
     }
     // Streets (O-W)
@@ -6185,10 +6215,11 @@ class OpenWorld extends World {
     this.addPlot(1205, -1318, 1245, -1282, Y + 0.02, 'concrete', { tile: 4 });
     this.lighthouse = { x: 1238, z: -1300 };
     // Flughafenstraße (Bogen nach Südwesten)
-    const apCtrl = [{ x: -240, z: 627 }, { x: -260, z: 760 }, { x: -420, z: 980 }, { x: -620, z: 1120 }, { x: -650, z: 1236 }];
+    const apCtrl = [{ x: -240, z: 627.6 }, { x: -260, z: 760 }, { x: -420, z: 980 }, { x: -620, z: 1120 }, { x: -650, z: 1236 }];
     const apCurve = new THREE.CatmullRomCurve3(apCtrl.map((p) => new THREE.Vector3(p.x, Y, p.z)));
     const apPts = apCurve.getSpacedPoints(Math.round(apCurve.getLength() / 4)).map((v) => ({ x: v.x, y: Y, z: v.z }));
-    this.addRoad(apPts, { type: 'street2', width: 11, sidewalk: 3, trimStart: 27, lamps: 'city', blend: 10 });
+    // die Flughafenstraße beginnt direkt am Außenrand des Kreisverkehrs (r = 28 m)
+    this.addRoad(apPts, { type: 'street2', width: 11, sidewalk: 3, trimStart: 0, lamps: 'city', blend: 10 });
     const apEnd = G.addNode(-650, Y, 1236, { radius: 4 });
     G.addEdge(rbDock.S, apEnd, apPts, { lanesF: 1, lanesB: 1, laneW: 3.6, speed: 15, kind: 'street' });
     // Terminal Road (südliche Docks)
@@ -6277,7 +6308,34 @@ class OpenWorld extends World {
           // durchgehende Straße über dem Tunnel: nur Gehwege
           continue;
         }
-        this.addPlot(x - 8, z - 8, x + 8, z + 8, Y, 'asphalt', { tile: 8, surf: SURF.asphalt });
+        // Kreuzungsfläche als Kreuz: Mittelfeld plus Zufahrten bis zum Ende der (um 13 m gekürzten) Straßen;
+        // fehlende Zufahrten am Rand des Rasters werden zu Gehweg
+        const AV = OW.AVE;
+        const ST = OW.STR;
+        const arm = {
+          n: z !== ST[0] || x === -40,
+          s: z !== ST[ST.length - 1] || x === -240,
+          w: x !== AV[0],
+          e: x !== AV[AV.length - 1] || z === -260,
+        };
+        const asph = { tile: 8, surf: SURF.asphalt };
+        const walk = { tile: 3 };
+        // Tunnel-Avenue: die abfallende Rampe schließt direkt an das Mittelfeld an
+        const tunnelN = x === OW.TUNNEL.x && z === -660;
+        const tunnelS = x === OW.TUNNEL.x && z === -1060;
+        this.addPlot(x - 8, z - 8, x + 8, z + 8, Y, 'asphalt', asph);
+        if (tunnelN) {
+          /* Rampe */
+        } else if (arm.n) this.addPlot(x - 8, z - 13, x + 8, z - 8, Y, 'asphalt', asph);
+        else this.addPlot(x - 8, z - 13, x + 8, z - 8, Y + 0.15, 'sidewalk', walk);
+        if (tunnelS) {
+          /* Rampe */
+        } else if (arm.s) this.addPlot(x - 8, z + 8, x + 8, z + 13, Y, 'asphalt', asph);
+        else this.addPlot(x - 8, z + 8, x + 8, z + 13, Y + 0.15, 'sidewalk', walk);
+        if (arm.w) this.addPlot(x - 13, z - 8, x - 8, z + 8, Y, 'asphalt', asph);
+        else this.addPlot(x - 13, z - 8, x - 8, z + 8, Y + 0.15, 'sidewalk', walk);
+        if (arm.e) this.addPlot(x + 8, z - 8, x + 13, z + 8, Y, 'asphalt', asph);
+        else this.addPlot(x + 8, z - 8, x + 13, z + 8, Y + 0.15, 'sidewalk', walk);
         // Eck-Gehwege
         for (const sx of [-1, 1])
           for (const sz of [-1, 1]) {
@@ -6292,10 +6350,10 @@ class OpenWorld extends World {
           g.rotateY(rot);
           this.addGeo(g, new THREE.Matrix4().makeTranslation(cx2, Y + 0.012, cz2), 'crosswalk', cx2, cz2);
         };
-        cw(x, z - 10.4, 0);
-        cw(x, z + 10.4, 0);
-        cw(x - 10.4, z, Math.PI / 2);
-        cw(x + 10.4, z, Math.PI / 2);
+        if (arm.n) cw(x, z - 10.4, 0);
+        if (arm.s) cw(x, z + 10.4, 0);
+        if (arm.w) cw(x - 10.4, z, Math.PI / 2);
+        if (arm.e) cw(x + 10.4, z, Math.PI / 2);
         // Ampeln an zwei Ecken
         const tl = trafficLightGeometry();
         const type = this.props.type('tlight', [{ dist: 420, parts: [{ geo: tl, mat: MAT.darkMetal, shadow: true }] }], { radius: 7 });
@@ -6305,6 +6363,24 @@ class OpenWorld extends World {
           this.colliders.addCircle(x + sx * 9.2, z + sz * 9.2, 0.2, Y, Y + 6, 'pole');
         }
       }
+    // T-Einmündungen am Ocean Drive (Bay Street / East Road kommen von Westen)
+    const asph = { tile: 8, surf: SURF.asphalt };
+    const walk = { tile: 3 };
+    for (const z of [OW.SKY_Z, -260]) {
+      const x = OW.OCEAN_X;
+      this.addPlot(x - 5.5, z - 11, x + 5.5, z + 11, Y, 'asphalt', asph);
+      this.addPlot(x - 11, z - 8, x - 5.5, z + 8, Y, 'asphalt', asph);
+      this.addPlot(x + 5.5, z - 11, x + 10.5, z + 11, Y + 0.15, 'sidewalk', walk);
+      this.addPlot(x - 11, z + 8, x - 5.5, z + 11, Y + 0.15, 'sidewalk', walk);
+      this.addPlot(x - 11, z - 11, x - 5.5, z - 8, Y + 0.15, 'sidewalk', walk);
+    }
+    // Ende der Hochstraße: Übergang in die Bay Street
+    {
+      const z = OW.SKY_Z;
+      this.addPlot(659.5, z - 9, 670.5, z + 9, Y, 'asphalt', asph);
+      this.addPlot(660, z + 9, 670.5, z + 13, Y + 0.15, 'sidewalk', walk);
+      this.addPlot(660, z - 13, 670.5, z - 9, Y + 0.15, 'sidewalk', walk);
+    }
   }
 
   plantPalm(x, y, z, s = 1) {
@@ -6398,7 +6474,6 @@ class OpenWorld extends World {
             continue;
           }
           // Aufteilung in Parzellen mit Gasse in der Mitte
-          const alongX = W >= D;
           const lots = [];
           const nA = W > 120 ? 2 : 1;
           const nB = D > 120 ? 2 : 1;
@@ -6422,10 +6497,9 @@ class OpenWorld extends World {
             const style = H > 110 ? rng.pick([0, 1, 6, 0, 1]) : H > 55 ? rng.pick([2, 1, 0, 2]) : rng.pick([2, 3, 3]);
             this.addTower(px, pz, w, d, H, style);
           }
-          // Gassen-Asphalt zwischen den Parzellen
-          if (nA > 1) this.addPlot(a0 + W / 2 - 4, b0, a0 + W / 2 + 4, b1, 0.46, 'asphalt', { tile: 8, surf: SURF.asphalt });
-          if (nB > 1) this.addPlot(a0, b0 + D / 2 - 4, a1, b0 + D / 2 + 4, 0.462, 'asphalt', { tile: 8, surf: SURF.asphalt });
-          void alongX;
+          // Gassen-Asphalt zwischen den Parzellen (5 cm über dem Gehwegniveau, gleiche Höhe am Kreuzungspunkt)
+          if (nA > 1) this.addPlot(a0 + W / 2 - 4, b0, a0 + W / 2 + 4, b1, 0.5, 'asphalt', { tile: 8, surf: SURF.asphalt });
+          if (nB > 1) this.addPlot(a0, b0 + D / 2 - 4, a1, b0 + D / 2 + 4, 0.5, 'asphalt', { tile: 8, surf: SURF.asphalt });
         }
         // Palmen an den Gehwegen des Blocks
         for (let x = x0 + 10; x < x1 - 6; x += 24) {
@@ -6479,17 +6553,17 @@ class OpenWorld extends World {
   }
   buildPark(x0, z0, x1, z1) {
     const rng = this.rng;
-    this.addPlot(x0 + 6, z0 + 6, x1 - 6, z1 - 6, 0.47, 'grass', { tile: 4, surf: SURF.grass });
+    this.addPlot(x0 + 6, z0 + 6, x1 - 6, z1 - 6, 0.5, 'grass', { tile: 4, surf: SURF.grass });
     const cx = (x0 + x1) / 2;
     const cz = (z0 + z1) / 2;
-    this.addGeo(fountainGeometry(), new THREE.Matrix4().makeTranslation(cx, 0.47, cz), 'concrete', cx, cz);
+    this.addGeo(fountainGeometry(), new THREE.Matrix4().makeTranslation(cx, 0.5, cz), 'concrete', cx, cz);
     this.colliders.addCircle(cx, cz, 4.4, 0, 4, 'wall');
     for (let k = 0; k < 26; k++) {
       const x = rng.float(x0 + 12, x1 - 12);
       const z = rng.float(z0 + 12, z1 - 12);
       if (Math.hypot(x - cx, z - cz) < 12) continue;
-      if (rng.chance(0.5)) this.plantTree(x, 0.47, z, rng.float(0.9, 1.4));
-      else this.plantPalm(x, 0.47, z, 0.9);
+      if (rng.chance(0.5)) this.plantTree(x, 0.5, z, rng.float(0.9, 1.4));
+      else this.plantPalm(x, 0.5, z, 0.9);
     }
   }
   addBillboard(x, y, z, rot, seed) {
@@ -6514,7 +6588,8 @@ class OpenWorld extends World {
     const pts = this.tunnelPts;
     const fr = pathFrames(pts);
     const B = this.builder;
-    const halfW = 9.5;
+    // Wände direkt an den Fahrbahnkanten (Straße ±8 m)
+    const halfW = 8.2;
     const i0 = pts.findIndex((p) => p.z > -1060 + 13);
     const i1 = pts.length - 1 - [...pts].reverse().findIndex((p) => p.z < -660 - 13);
     // Stützmauern der Rampen + Tunnelwände
@@ -6532,10 +6607,16 @@ class OpenWorld extends World {
     const ceil = new THREE.PlaneGeometry(halfW * 2, zc1 - zc0, 1, 16);
     ceil.rotateX(Math.PI / 2);
     this.addGeo(ceil, new THREE.Matrix4().makeTranslation(T.x, -0.6, (zc0 + zc1) / 2), 'concreteDark', T.x, (zc0 + zc1) / 2);
+    // Gehwegstreifen zwischen Rampenwänden und den Häuserblöcken
+    for (const [za, zb] of [[-1047, zc0], [zc1, -673]]) {
+      this.addPlot(T.x - 13, za, T.x - halfW, zb, 0.45, 'sidewalk', { tile: 3 });
+      this.addPlot(T.x + halfW, za, T.x + 13, zb, 0.45, 'sidewalk', { tile: 3 });
+    }
     // Oberfläche des Platzes (Gehweg) + Straße z=-860 darüber
     this.addPlot(T.x - halfW - 6, zc0, T.x + halfW + 6, -873, 0.45, 'sidewalk', { tile: 3 });
     this.addPlot(T.x - halfW - 6, -847, T.x + halfW + 6, zc1, 0.45, 'sidewalk', { tile: 3 });
-    this.addPlot(T.x - halfW - 6, -873, T.x + halfW + 6, -847, 0.3, 'road_city4', { tile: 16, surf: SURF.asphalt });
+    // Straßenstück über dem Tunnel schließt die 40-m-Lücke der Straße z = -860 (x von -60 bis -20)
+    this.addPlot(T.x - 20, -873, T.x + 20, -847, 0.3, 'road_city4', { tile: 16, surf: SURF.asphalt });
     // Portale (Stirnwände mit Öffnung)
     for (const z of [zc0, zc1]) {
       const dir = z === zc0 ? -1 : 1;
@@ -6608,7 +6689,6 @@ class OpenWorld extends World {
       k++;
       z += w + rng.float(10, 22);
     }
-    this.addPlot(950, -1265, X - 11, 590, 0.45, 'sidewalk', { tile: 3 });
     // Midtown zwischen Downtown und Ring
     for (const [z0, z1] of [[-1120, -573], [-547, -273], [-247, 380]]) {
       this.addPlot(373, z0, 834, z1, 0.45, 'sidewalk', { tile: 3 });
@@ -6623,7 +6703,8 @@ class OpenWorld extends World {
       }
     }
     // Strandseite östlich Ocean Drive / Hotels zwischen Ring und Ocean Drive
-    this.addPlot(866, -1265, X - 11, 590, 0.45, 'sidewalk', { tile: 3 });
+    // Gehwegflächen zwischen den Querstraßen (Bay Street z = -560, East Road z = -260, Dock Street z = 600)
+    for (const [z0, z1] of [[-1265, -573], [-547, -273], [-247, 587]]) this.addPlot(866, z0, X - 11, z1, 0.45, 'sidewalk', { tile: 3 });
     for (let zz = -1240; zz < 560; zz += rng.float(60, 90)) {
       if (Math.abs(zz + 560) < 30 || Math.abs(zz + 260) < 30 || Math.abs(zz + 1300) < 30) continue;
       this.addBuilding(rng.float(895, 915), zz + 15, rng.float(30, 40), rng.float(26, 34), rng.float(10, 30), rng.pick([3, 7]), { color: rng.pick(pastels) });
@@ -9522,6 +9603,9 @@ function tireCurve(rho) {
   return Math.sin(1.6 * Math.atan(1.25 * rho));
 }
 
+// physikalische Obergrenze der Raddrehzahl (rad/s, entspricht > 500 km/h)
+const OMEGA_MAX = 420;
+
 class Vehicle {
   constructor(type, opts = {}) {
     const t = CAR_TYPES[type] || CAR_TYPES.sport;
@@ -9818,10 +9902,10 @@ class Vehicle {
     if (ph.drive === 'awd') {
       const f = wheelT * 0.4;
       const r = wheelT * 0.6;
-      this.distribute(this.wheels[0], this.wheels[1], f, lsd);
-      this.distribute(this.wheels[2], this.wheels[3], r, lsd);
-    } else if (ph.drive === 'fwd') this.distribute(this.wheels[0], this.wheels[1], wheelT, lsd * 0.5);
-    else this.distribute(this.wheels[2], this.wheels[3], wheelT, lsd);
+      this.distribute(this.wheels[0], this.wheels[1], f, lsd, h);
+      this.distribute(this.wheels[2], this.wheels[3], r, lsd, h);
+    } else if (ph.drive === 'fwd') this.distribute(this.wheels[0], this.wheels[1], wheelT, lsd * 0.5, h);
+    else this.distribute(this.wheels[2], this.wheels[3], wheelT, lsd, h);
     // Bremsen (ABS hält das Rad nahe am Haftmaximum; Gas+Bremse im Stand = Burnout mit Vorderradbremse)
     const brake = this.disabled ? 1 : this.brakeIn;
     const burnout = this.throttleIn > 0.5 && brake > 0.5 && Math.abs(vLongBody) < 7 && this.gear >= 1 && !this.disabled;
@@ -9906,7 +9990,7 @@ class Vehicle {
         const db = (h * w.brakeT) / I;
         if (Math.abs(om) <= db) om = 0;
         else om -= Math.sign(om) * db;
-        w.omega = om * (1 - h * 0.15);
+        w.omega = clamp(om * (1 - h * 0.15), -OMEGA_MAX, OMEGA_MAX);
         w.sr = 0;
         w.sa = 0;
         w.skid = 0;
@@ -9973,7 +10057,7 @@ class Vehicle {
         if (Math.abs(om) <= db) om = 0;
         else om -= Math.sign(om) * db;
       }
-      w.omega = om;
+      w.omega = clamp(om, -OMEGA_MAX, OMEGA_MAX);
       sr = (w.omega * Reff - vLong) / vRef;
       let Fy;
       [Fx, Fy] = forces(sr);
@@ -10091,8 +10175,11 @@ class Vehicle {
     if (!this.onGround) this.airTime += h;
     else this.airTime = 0;
   }
-  distribute(wl, wr, T, lsd) {
-    const d = (wl.omega - wr.omega) * lsd;
+  // Sperrdifferenzial: Kopplung begrenzt auf einen Wert, der für den expliziten Schritt h stabil bleibt
+  // (sonst schaukeln sich frei drehende Räder, z. B. in der Luft, gegenseitig auf)
+  distribute(wl, wr, T, lsd, h) {
+    const k = Math.min(lsd, (this.ph.iw / (2 * h)) * 0.8);
+    const d = (wl.omega - wr.omega) * k;
     wl.driveT = T / 2 - d;
     wr.driveT = T / 2 + d;
   }
@@ -11260,7 +11347,8 @@ function collidePair(a, b, events) {
   a.pos.z += _hit.nz * _hit.pen * wa;
   b.pos.x -= _hit.nx * _hit.pen * (1 - wa);
   b.pos.z -= _hit.nz * _hit.pen * (1 - wa);
-  const y = (Math.max(ay[0], by[0]) + Math.min(ay[1], by[1])) / 2;
+  // Kontakt auf Schwerpunkthöhe: Seitentreffer drehen die Fahrzeuge, kippen sie aber nicht um
+  const y = (a.pos.y + b.pos.y) / 2;
   _P.set(_hit.px, y, _hit.pz);
   _N.set(_hit.nx, 0, _hit.nz);
   a.pointVelocity(_P, _vp);
@@ -11432,7 +11520,7 @@ const TRAFFIC_TYPES = [
 ];
 const TRAFFIC_COLORS = ['#e8e8e8', '#1c1c1e', '#7d8288', '#b8bcc2', '#8b1a1a', '#1d3f7a', '#2e5e3a', '#c9a227', '#4a2f6b', '#c2410c', '#0f766e', '#f2f2f2', '#3b3b40'];
 
-// Einfacher 2D-Starrkörper für Zivilfahrzeuge (nach Kollision)
+// Einfacher 2D-Starrkörper für Zivilfahrzeuge (nach Kollision); car: zugehöriges TrafficCar
 class SimpleBody {
   constructor(car) {
     this.car = car;
@@ -11491,7 +11579,7 @@ class TrafficCar {
     this.vtype = vtype;
     this.visual = new CarVisual(vtype, { look, detail: 'low', livery: type === 'taxi' ? 'taxi' : type === 'patrol' ? 'police' : null });
     this.t = this.visual.t;
-    this.body = new SimpleBody(this.visual);
+    this.body = new SimpleBody(this);
     this.state = 'drive';
     this.lane = null;
     this.s = 0;
@@ -12200,8 +12288,8 @@ class PoliceSystem {
     const target = new THREE.Object3D();
     grp.add(spot, target);
     spot.target = target;
-    const coneMat = makeColumnMaterial('#cfe0ff');
-    coneMat.opacity = 0.35;
+    // weicher, volumetrisch wirkender Lichtkegel (nur Außenseite: steht die Kamera im Kegel, wird nichts überblendet)
+    const coneMat = makeBeamMaterial(new THREE.Color(0.8, 0.88, 1.0));
     const cone = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 9, 60, 20, 1, true).translate(0, -30, 0), coneMat);
     cone.userData.noAO = true;
     grp.add(cone);
@@ -12334,8 +12422,8 @@ class PoliceSystem {
       h.cone.position.copy(h.spot.position);
       h.cone.quaternion.setFromUnitVectors(_v5.set(0, -1, 0), dir.normalize());
       h.cone.scale.set(1, len / 60, 1);
-      h.spot.intensity = 9000 * (0.4 + night);
-      h.cone.material.opacity = 0.12 + night * 0.25;
+      h.spot.intensity = 260 * (0.3 + night);
+      h.cone.material.uniforms.uOpacity.value = 0.04 + night * 0.22;
       if (this.stars === 0) {
         h.vel.y += dt * 8;
         if (h.pos.y > P.pos.y + 220) {
@@ -13629,7 +13717,7 @@ class CameraRig {
       this.updateSpecial(dt, veh, sp, world);
       cam.position.x += n1 * sAmt;
       cam.position.y += n2 * sAmt;
-      cam.near = 0.15;
+      cam.near = 0.3;
       cam.updateProjectionMatrix();
       return;
     }
@@ -13680,7 +13768,8 @@ class CameraRig {
       cam.position.x += n1 * sAmt;
       cam.position.y += n2 * sAmt;
       cam.lookAt(this.look);
-      cam.near = 0.15;
+      // größere Near-Plane = höhere Tiefenpräzision in der Ferne (kein Flimmern flacher Ebenen)
+      cam.near = 0.3;
     } else {
       // Motorhaube / Cockpit (fest mit der Karosserie verbunden)
       const eye = this.mode === 1 ? visual.hoodEye : visual.cockpitEye;
@@ -13706,7 +13795,7 @@ class CameraRig {
       cam.quaternion.setFromEuler(_e1);
       cam.position.x += n1 * sAmt * 0.3;
       cam.position.y += n2 * sAmt * 0.3;
-      cam.near = this.mode === 2 ? 0.05 : 0.12;
+      cam.near = this.mode === 2 ? 0.06 : 0.25;
       this.pos.copy(cam.position);
     }
     cam.fov = this.fov;
@@ -14927,6 +15016,9 @@ class Game {
     }
     o.classList.remove('hidden');
     this.overlay = title;
+    // Geldanzeige sofort auf den neuen Stand setzen (HUD läuft bei offenem Overlay nicht weiter)
+    this.hud.moneyShown = Save.data.money;
+    $('money').textContent = fmtMoney(Save.data.money);
   }
   closeOverlay() {
     $('overlay').classList.add('hidden');
@@ -15035,7 +15127,7 @@ class Game {
     Bus.on('roadblock', () => this.hud.toast('Straßensperre mit Nagelband voraus!', 'bad'));
     Bus.on('speedtrap', (e) => {
       AUDIO.speedCam(e.record);
-      this.flash = 0.9;
+      this.flash = 0.6;
       if (e.record) {
         this.hud.moneyDelta(e.reward);
         this.hud.message(`BLITZER ${e.kmh} KM/H`, `Neuer Rekord · ${e.name} · +${fmtMoney(e.reward)}`, '#ffd166', 2.6);
@@ -15563,7 +15655,7 @@ class Game {
     fu.uSlow.value = damp(fu.uSlow.value, this.timeScale < 0.7 ? 1 : 0, 6, real);
     fu.uDamage.value = P.health < 30 ? (0.5 + 0.5 * Math.sin(this.time * 6)) * (1 - P.health / 30) * 0.8 : 0;
     this.flash = Math.max(0, (this.flash || 0) - real * 3.5);
-    fu.uFlash.value = this.flash * 0.85;
+    fu.uFlash.value = this.flash * 0.5;
     // Spielstand
     this.saveTimer += real;
     if (this.saveTimer > 12) {
@@ -15629,7 +15721,10 @@ class Game {
     }
   }
   sanitize(v) {
-    const ok = Number.isFinite(v.pos.x + v.pos.y + v.pos.z + v.vel.x + v.vel.y + v.vel.z + v.angVel.x + v.angVel.y + v.angVel.z + v.quat.x + v.quat.y + v.quat.z + v.quat.w + v.rpm);
+    if (v.rpm > v.redline * 1.3) v.rpm = v.redline * 1.3;
+    let ok = Number.isFinite(v.pos.x + v.pos.y + v.pos.z + v.vel.x + v.vel.y + v.vel.z + v.angVel.x + v.angVel.y + v.angVel.z + v.quat.x + v.quat.y + v.quat.z + v.quat.w + v.rpm);
+    for (const w of v.wheels) if (!Number.isFinite(w.omega)) ok = false;
+    if (ok && v.vel.lengthSq() > 200 * 200) ok = false;
     if (ok) {
       if (!v.safe) v.safe = { pos: new THREE.Vector3(), heading: 0 };
       v.safe.pos.copy(v.pos);
@@ -15839,7 +15934,7 @@ class Game {
       const lamp = near[i];
       if (lamp && i < n && (night > 0.1 || lamp.tunnel)) {
         l.position.set(lamp.x, lamp.y - 0.3, lamp.z);
-        l.intensity = (lamp.tunnel ? 120 : 130) * Math.max(night, lamp.tunnel ? 1 : 0);
+        l.intensity = (lamp.tunnel ? 40 : 32) * Math.max(night, lamp.tunnel ? 1 : 0);
       } else l.intensity = 0;
     });
     // Blaulicht der nächsten Streife
