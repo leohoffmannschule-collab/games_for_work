@@ -2379,16 +2379,36 @@ function makeFacadeMaterial() {
           vec2 wuv = vec2( u, v ) * 0.25;
           vec3 wtex = texture2D( tWall, wuv ).rgb;
           vec3 wn = texture2D( tWallN, wuv ).xyz * 2.0 - 1.0;
-          float shop = step( v, 4.5 ) * step( 1.5, style ) * step( style, 3.5 );
-          if ( shop > 0.5 ) { my0 = 0.05; my1 = 0.75; mx = 0.05; }
+          bool glassy = glassMetal > 0.3;
+          // Ladenzone im Erdgeschoss (Büro, Wohnen, Hotel)
+          float shop = step( v, 3.6 ) * ( step( 1.5, style ) * step( style, 3.5 ) + step( 6.5, style ) );
+          if ( shop > 0.5 ) { my0 = 0.04; my1 = 0.78; mx = 0.05; }
+          // Eckpilaster bei Wohnhäusern, Art déco und Hotels
+          float corner = min( u, faceW - u );
+          float pil = ( ( style > 2.5 && style < 4.5 ) || style > 6.5 ) ? 0.75 : 0.0;
           float win = step( mx, f.x ) * step( f.x, 1.0 - mx ) * step( my0, f.y ) * step( f.y, my1 );
           if ( v < 0.6 || v > vFaceSize.y - 0.8 ) win = 0.0;
+          if ( faceW < 9000.0 && corner < pil ) win = 0.0;
           vec3 base = wallCol * ( 0.75 + 0.5 * wtex.g );
           float rough = wallRough;
           float metal = 0.0;
           vec3 pN = normalize( N + T * wn.x * 0.35 + vec3( 0.0, wn.y * 0.35, 0.0 ) );
           float edge = min( min( f.x - mx, 1.0 - mx - f.x ), min( f.y - my0, my1 - f.y ) );
-          if ( win > 0.5 ) {
+          // Abstände zum Fensterrand in Metern (für Rahmen, Laibung, Sprossen)
+          float ex = min( f.x - mx, 1.0 - mx - f.x ) * cw;
+          float eyT = ( my1 - f.y ) * floorH;
+          float eyB = ( f.y - my0 ) * floorH;
+          float frameW = glassy ? 0.035 : 0.065;
+          float mull = ( !glassy && shop < 0.5 && ( 1.0 - 2.0 * mx ) * cw > 1.5 ) ? step( abs( f.x - 0.5 ) * cw, 0.032 ) : 0.0;
+          float tran = ( ( style > 2.5 && style < 3.5 ) || style > 6.5 ) && shop < 0.5 ? step( abs( f.y - mix( my0, my1, 0.74 ) ) * floorH, 0.028 ) : 0.0;
+          float frame = win * max( step( min( ex, min( eyT, eyB ) ), frameW ), max( mull, tran ) );
+          vec3 frameCol = glassy ? vec3( 0.28, 0.3, 0.33 ) : ( style > 1.5 && style < 2.5 ) ? vec3( 0.16, 0.17, 0.18 ) : vec3( 0.86, 0.85, 0.81 );
+          if ( win > 0.5 && frame < 0.5 ) {
+            if ( glassy ) {
+              // Vorhangfassade: jede Scheibe leicht anders getönt und unterschiedlich glatt -> gebrochene Spiegelungen
+              glassCol *= 0.78 + 0.44 * fhash( id * 1.73 + seed );
+              glassRough = 0.025 + 0.1 * fhash( id.yx * 2.31 + seed * 3.1 );
+            }
             vec3 V = normalize( vWPos - cameraPosition );
             vec3 rd = vec3( dot( V, T ), V.y, dot( V, -N ) );
             rd.z = max( rd.z, 0.05 );
@@ -2417,13 +2437,44 @@ function makeFacadeMaterial() {
             vec3 interior = roomCol * ( ambientRoom + lit * lightC * 1.15 );
             interior = mix( interior, vec3( 0.8, 0.75, 0.65 ) * ( ambientRoom + lit * 0.85 ), blind );
             if ( shop > 0.5 ) interior *= 1.0 + uNight * 0.55;
-            base = mix( interior * 0.35, glassCol, glassMetal * 0.6 );
+            // Laibung: Schatten am oberen und seitlichen Fensterrand (Fenster sitzen in der Wand)
+            float reveal = glassy ? 1.0 : mix( 0.45, 1.0, smoothstep( 0.0, 0.28, eyT ) ) * mix( 0.7, 1.0, smoothstep( 0.0, 0.14, ex ) );
+            base = mix( interior * 0.35, glassCol, glassMetal * 0.6 ) * reveal;
             facEmissive = interior * ( 0.3 + 0.7 * uNight ) * ( 1.0 - glassMetal * 0.45 );
             rough = glassRough;
             metal = glassMetal;
             pN = N;
+          } else if ( win > 0.5 ) {
+            // Fensterrahmen, Mittelsprosse, Kämpfer
+            base = frameCol;
+            rough = glassy ? 0.35 : 0.5;
+            metal = glassy ? 0.7 : 0.1;
+            pN = N;
           } else {
             base *= 1.0 - 0.45 * smoothstep( 0.05, 0.0, edge ) * step( edge, 0.05 ) * step( -0.12, edge );
+            if ( !glassy && style < 4.5 || style > 6.5 ) {
+              // Geschossband (Deckenstirn) mit Fuge
+              float fy = f.y * floorH;
+              base *= fy < 0.3 ? ( fy < 0.03 ? 0.62 : 0.9 ) : 1.0;
+              // Fensterbank mit Schattenkante, darunter Schmutzfahnen
+              float inX = step( mx - 0.02, f.x ) * step( f.x, 1.0 - mx + 0.02 );
+              float dy = ( my0 - f.y ) * floorH;
+              if ( inX > 0.5 && dy > 0.0 && dy < 0.07 ) base = wallCol * 1.18 + 0.06;
+              else if ( inX > 0.5 && dy >= 0.07 && dy < 0.18 ) base *= 0.78;
+              else if ( inX > 0.5 && dy >= 0.18 ) base *= 1.0 - 0.1 * smoothstep( 0.2, 0.9, dy ) * ( 0.6 + 0.4 * wtex.r );
+            }
+            // Eckpilaster heller abgesetzt
+            if ( faceW < 9000.0 && corner < pil ) base = wallCol * 1.12 * ( 0.85 + 0.3 * wtex.g );
+            // Ladenzone: Blende (Firmenschild-Band) über den Schaufenstern
+            if ( ( ( style > 1.5 && style < 3.5 ) || style > 6.5 ) && v > 2.9 && v < 3.5 ) {
+              base = mix( vec3( 0.07 ), accent * 0.35, 0.45 );
+              facEmissive += accent * 0.18 * uNight;
+            }
+          }
+          // Verwitterung: Sockelschmutz unten, dunklere Attika oben
+          if ( !glassy ) {
+            base *= mix( 0.8, 1.0, smoothstep( 0.4, 3.2, v ) );
+            base *= mix( 0.86, 1.0, smoothstep( 0.0, 1.6, vFaceSize.y - v ) );
           }
           // Lichtband an der Krone und LED-Kanten hoher Gebäude (nachts)
           if ( vFaceSize.y > 40.0 && vFaceSize.y < 9000.0 ) {
@@ -2612,6 +2663,10 @@ function buildMaterials() {
   MAT.darkMetal = std({ color: 0x2a2d31, roughness: 0.5, metalness: 0.8 });
   MAT.galvanized = std({ color: 0xb8bcc0, roughness: 0.35, metalness: 0.95, normalMap: L.brushed.normalMap, normalScale: new THREE.Vector2(0.3, 0.3) });
   MAT.paintedMetal = std({ color: 0xffffff, roughness: 0.45, metalness: 0.3, vertexColors: true });
+  // Gebäudedetails (Farbe je Instanz): Gesimse/Attika, Dachtechnik, Balkone mit Glasbrüstung
+  MAT.bldTrim = std({ color: 0xffffff, roughness: 0.85, metalness: 0.0 });
+  MAT.bldGear = std({ color: 0xffffff, roughness: 0.5, metalness: 0.6 });
+  MAT.bldGlass = std({ color: 0xa9c2d2, roughness: 0.08, metalness: 0.4, transparent: true, opacity: 0.42, depthWrite: false });
   MAT.corrugated = std({ map: L.corrugated.map, normalMap: L.corrugated.normalMap, roughnessMap: L.corrugated.orm, metalnessMap: L.corrugated.orm, aoMap: L.corrugated.orm, roughness: 1, metalness: 1 });
   MAT.rubber = std({ color: 0x111111, roughness: 0.9 });
   MAT.blackPlastic = std({ color: 0x0b0b0c, roughness: 0.55, metalness: 0.0, normalMap: L.plastic.normalMap, normalScale: new THREE.Vector2(0.4, 0.4) });
@@ -5446,6 +5501,84 @@ class World {
     type.add(_m1, col, [(this.rng || (this.rng = new RNG(5))).next(), style, opts.lit !== undefined ? opts.lit : (this.rng || (this.rng = new RNG(5))).float(0.25, 0.6), (this.rng || (this.rng = new RNG(5))).next()], Math.hypot(w, h, d) / 2);
     if (opts.collide !== false) this.colliders.addBox(x, z, w / 2, d / 2, -rot, y - 1, y + h, 'building');
     if (!opts.noFootprint) this.footprints.push({ x, z, w, d, rot: -rot });
+    if (opts.details !== false) this.addBuildingDetails(x, y, z, w, d, h, style, rot, opts);
+  }
+
+  // Architektur-Details als Instanzen: Attika/Gesims, Erdgeschoss-Gesims, Dachtechnik, Wassertanks, Balkone
+  addBuildingDetails(x, y, z, w, d, h, style, rot, opts) {
+    const r = this._drng || (this._drng = new RNG(4711));
+    const glass = style === 0 || style === 1 || style === 6;
+    const top = y + h;
+    const cs = Math.cos(rot);
+    const sn = Math.sin(rot);
+    const P = this.props;
+    const box = cachedGeo('bld_box', () => new THREE.BoxGeometry(1, 1, 1).translate(0, 0.5, 0));
+    const trim = P.type('bldTrim', [{ dist: 2200, parts: [{ geo: box, mat: MAT.bldTrim, shadow: true }] }], { radius: 20, colors: true, alwaysCull: true });
+    const gear = P.type('bldGear', [{ dist: 650, parts: [{ geo: box, mat: MAT.bldGear, shadow: false }] }], { radius: 4, colors: true });
+    const put = (type, lx, ly, lz, sx, sy, sz, col, extraRot = 0) => {
+      _m1.compose(_v1.set(x + lx * cs + lz * sn, ly, z - lx * sn + lz * cs), _q1.setFromEuler(_e1.set(0, rot + extraRot, 0)), _v2.set(sx, sy, sz));
+      type.add(_m1, col, null, Math.hypot(sx, sy, sz) / 2);
+    };
+    // Grundfarbe der Fassade (wie im Fassaden-Shader) für passende Gesimse
+    const base = opts.color ? _c2.set(opts.color) : _c2.setRGB(1, 1, 1);
+    const trimCol = new THREE.Color();
+    if (glass) trimCol.setRGB(0.17, 0.18, 0.2);
+    else if (style === 2) trimCol.setRGB(0.6, 0.58, 0.55);
+    else if (style === 3) trimCol.setRGB(0.8, 0.76, 0.69);
+    else if (style === 5) trimCol.setRGB(0.42, 0.43, 0.45);
+    else trimCol.copy(base).multiplyScalar(0.65).addScalar(0.35);
+    // Kranzgesims (umlaufendes Band knapp unter der Dachkante) und Attika als Brüstung rund um das Kiesdach
+    const o = glass ? 0.3 : 0.7;
+    const t = glass ? 0.25 : 0.4;
+    const ph = glass ? 0.6 : 1.0;
+    // (Oberkante 20 cm unter der Dachfläche, damit nichts koplanar flimmert)
+    if (!glass) put(trim, 0, top - 0.75, 0, w + o, 0.55, d + o, trimCol);
+    put(trim, 0, top, (d + o) / 2 - t / 2, w + o, ph, t, trimCol);
+    put(trim, 0, top, -(d + o) / 2 + t / 2, w + o, ph, t, trimCol);
+    put(trim, (w + o) / 2 - t / 2, top, 0, t, ph, d + o - 2 * t, trimCol);
+    put(trim, -(w + o) / 2 + t / 2, top, 0, t, ph, d + o - 2 * t, trimCol);
+    // Gesims über dem Erdgeschoss (Wohnen, Art déco, Hotel)
+    if (h > 9 && (style === 3 || style === 4 || style === 7)) put(trim, 0, y + 3.55, 0, w + 0.35, 0.32, d + 0.35, trimCol);
+    // Dachtechnik
+    const inner = (m) => [r.float(-(w / 2 - m), w / 2 - m), r.float(-(d / 2 - m), d / 2 - m)];
+    if (w > 9 && d > 9) {
+      const n = Math.min(5, 1 + Math.floor((w * d) / 450));
+      for (let k = 0; k < n; k++) {
+        const [lx, lz] = inner(3);
+        const g = r.float(0.32, 0.6);
+        put(gear, lx, top, lz, r.float(1.6, 3.2), r.float(1.0, 1.9), r.float(1.6, 3.0), _c1.setRGB(g, g, g * 1.04), r.chance(0.5) ? Math.PI / 2 : 0);
+      }
+      // Treppenhaus-/Aufzugsaufbau
+      const [lx, lz] = inner(4);
+      put(trim, lx, top, lz, r.float(3.5, 5.5), r.float(2.8, 3.6), r.float(3.5, 5.0), trimCol);
+      // Technikgeschoss bei hohen Glastürmen
+      if (glass && h > 60) put(trim, 0, top, 0, w * r.float(0.4, 0.55), 4.5, d * r.float(0.4, 0.55), _c1.setRGB(0.12, 0.13, 0.15));
+      // Wassertank auf Wohnhäusern
+      if (style === 3 && h < 70 && r.chance(0.6)) {
+        const tank = P.type('bldTank', [{ dist: 700, parts: [{ geo: cachedGeo('bld_tank', () => mergeGeometries([new THREE.CylinderGeometry(1.4, 1.4, 2.8, 14).translate(0, 3.0, 0), new THREE.ConeGeometry(1.55, 0.9, 14).translate(0, 4.85, 0), ...[[-1, -1], [1, -1], [-1, 1], [1, 1]].map(([a, b]) => new THREE.CylinderGeometry(0.08, 0.08, 1.6, 5).translate(a * 0.9, 0.8, b * 0.9))])), mat: MAT.bldTrim, shadow: true }] }], { radius: 4, colors: true });
+        const [tx, tz] = inner(3);
+        put(tank, tx, top, tz, 1, 1, 1, _c1.setRGB(0.55, 0.4, 0.3));
+      }
+    }
+    // Durchgehende Balkonbänder auf den Längsseiten (Wohnhäuser und Hotels)
+    if ((style === 3 || style === 7) && h >= 10 && opts.balconies !== false) {
+      const floorH = style === 7 ? 3.4 : 3.6;
+      const bal = P.type('bldBalcony', [{ dist: 900, parts: [
+        { geo: cachedGeo('bld_bal_slab', () => mergeGeometries([new THREE.BoxGeometry(1, 0.16, 1.3).translate(0, 0.08, 0), new THREE.BoxGeometry(1, 0.05, 0.07).translate(0, 1.15, 0.62)])), mat: MAT.bldTrim, shadow: true },
+        { geo: cachedGeo('bld_bal_glass', () => new THREE.BoxGeometry(1, 0.98, 0.03).translate(0, 0.65, 0.62)), mat: MAT.bldGlass, shadow: false },
+      ] }], { radius: 12, colors: true });
+      const alongX = w >= d;
+      const len = (alongX ? w : d) * 0.84;
+      const half = (alongX ? d : w) / 2 + 0.65;
+      const nF = Math.floor((h - 1.2) / floorH);
+      const col = trimCol;
+      for (const side of [-1, 1])
+        for (let f = 1; f < nF; f++) {
+          const yy = y + f * floorH - 0.02;
+          if (alongX) put(bal, 0, yy, side * half, len, 1, 1, col, side > 0 ? 0 : Math.PI);
+          else put(bal, side * half, yy, 0, len, 1, 1, col, side > 0 ? Math.PI / 2 : -Math.PI / 2);
+        }
+    }
   }
 
   // ---------------- Gelände ----------------
@@ -6759,10 +6892,10 @@ class OpenWorld extends World {
   }
   addHotel(x, z, w, d, h, color, name, idx) {
     // Hauptkörper + Mittelturm (Fassaden-Shader, Stil "hotel"), Neonröhren, Gesimse, Schriftzug
-    this.addBuilding(x, z, d, w, h, 7, { color, lit: 0.55 });
+    this.addBuilding(x, z, d, w, h, 7, { color, lit: 0.55, balconies: false });
     const tw = Math.min(10, w * 0.25);
     const th = h + 6 + (idx % 3) * 3;
-    this.addBuilding(x + d / 2 - 2.2, z, 5, tw, th, 7, { color, lit: 0.4, noFootprint: true, collide: false });
+    this.addBuilding(x + d / 2 - 2.2, z, 5, tw, th, 7, { color, lit: 0.4, noFootprint: true, collide: false, balconies: false });
     // Gesimse (horizontale "Augenbrauen")
     const front = x + d / 2;
     for (let yy = 3.4; yy < h - 1; yy += 3.4) this.addBox(front + 0.35, 0.45 + yy, z, 0.7, 0.18, w + 0.4, 0, 'white');
@@ -9670,6 +9803,8 @@ class Vehicle {
     this.vel = new THREE.Vector3();
     this.angVel = new THREE.Vector3();
     this.in = { throttle: 0, brake: 0, steer: 0, handbrake: false, nitro: false, shiftUp: false, shiftDown: false, hold: false };
+    // Schräglaufreserve der Vorderreifen für die Lenkwinkelbegrenzung (rad)
+    this.steerSlip = 0.115;
     this.ai = !!opts.ai;
     this.assist = opts.assist !== false;
     this.up = { engine: 0, turbo: 0, tires: 0, nitro: 0, exhaust: 0 };
@@ -9824,11 +9959,16 @@ class Vehicle {
     const rate = (Math.abs(target) < Math.abs(this.steerSmooth) || Math.sign(target) !== Math.sign(this.steerSmooth) ? 7 : 3.6) * (this.ai ? 2 : 1);
     this.steerSmooth += clamp(target - this.steerSmooth, -rate * dt, rate * dt);
     const v = Math.abs(vLong);
-    const maxDeg = ph.steer / (1 + Math.max(0, v - 4) / 20) + 2.5;
-    let delta = this.steerSmooth * maxDeg * DEG;
-    // Gegenlenk-Assistent beim Driften
     const beta = Math.atan2(vLat, Math.max(Math.abs(vLong), 0.5));
     this.beta = beta;
+    // Lenkwinkel nach Haftgrenze: voller Tastatur-Einschlag liefert bei jedem Tempo etwa die maximale
+    // Seitenführung (kinematischer Anteil L·a/v² plus Schräglauf der Vorderreifen) statt die Reifen zu überfordern
+    const aMax = ph.mu * this.gripMul * G * (1 - (world.wetness || 0) * 0.2);
+    const gripDeg = (Math.atan((this.t.wb * aMax) / Math.max(v * v, 1)) + this.steerSlip) / DEG;
+    // im Drift mehr Einschlag zum Gegenlenken freigeben
+    const maxDeg = Math.min(ph.steer, gripDeg) + Math.min(22, (Math.max(0, Math.abs(beta) - 0.12) / DEG) * 0.8);
+    let delta = this.steerSmooth * maxDeg * DEG;
+    // Gegenlenk-Assistent beim Driften
     // nur bei echtem Übersteuern (großer Schwimmwinkel) gegenlenken, nicht bei normaler Kurvenfahrt
     if (this.assist && v > 6 && !this.ai) {
       const over = Math.sign(beta) * Math.max(0, Math.abs(beta) - 0.1);
@@ -10143,6 +10283,16 @@ class Vehicle {
       const yawRate = this.angVel.dot(_up);
       const e = yawRate - yawRef;
       if (Math.abs(e) > 0.04) _T.addScaledVector(_up, -(e - Math.sign(e) * 0.04) * this.I.y * esc * 3);
+      // Drift-Stabilisator (Fahrhilfe): begrenzt den Schwimmwinkel, damit Drifts haltbar bleiben statt
+      // in einen Dreher überzugehen; wirkt nur auf das Weiterdrehen, nicht auf das Einlenken
+      if (this.assist && !this.ai) {
+        const b = this.beta;
+        const yawB = this.angVel.dot(_up);
+        const bLim = 0.5 + Math.abs(this.in.steer) * 0.1;
+        const over = Math.abs(b) - bLim;
+        if (over > 0) _T.addScaledVector(_up, -Math.sign(b) * over * this.I.y * 9);
+        if (Math.abs(b) > 0.3 && Math.sign(yawB) === Math.sign(b)) _T.addScaledVector(_up, -yawB * this.I.y * smoothstep(0.3, 0.7, Math.abs(b)) * 2.2);
+      }
     }
     if (this.driftWindow > 0) this.driftWindow -= h;
     // --- Aerodynamik ---

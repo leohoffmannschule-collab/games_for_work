@@ -83,7 +83,13 @@ A Handbremse, X Nitro, Y Kamera, B Fokus, LB Interaktion, Back Zurücksetzen, St
 - **Fahrphysik**: Starrkörper mit vier unabhängigen Feder-Dämpfer-Einheiten (Eintauchen, Nicken,
   Wanken), kombiniertes Reifenmodell mit Schräglauf und Schlupf, Antriebsstrang mit Turbo,
   Getriebe und Sperrdifferenzial, Aerodynamik, Driften, Burnouts, bleibende Reifenspuren,
-  Reifenqualm und glühende Bremsscheiben.
+  Reifenqualm und glühende Bremsscheiben. Der Lenkeinschlag richtet sich nach der Haftgrenze
+  (voller Tastatur-Einschlag nutzt bei jedem Tempo die maximale Seitenführung), ein
+  Drift-Stabilisator hält Handbremsen-Drifts kontrollierbar (beides Teil der abschaltbaren Fahrhilfen).
+- **Gebäude**: Fassaden-Shader mit Interior Mapping, Fensterrahmen, Sprossen, Fensterbänken,
+  Geschossbändern, Eckpilastern, Ladenzonen mit Leuchtblenden und Verwitterung; Glastürme mit
+  unterschiedlich spiegelnden Scheiben; dazu instanzierte Attiken, Gesimse, Balkonbänder mit
+  Glasbrüstungen, Dachtechnik und Wassertanks.
 - **Schaden**: Vertex-Dellen proportional zur Aufprallenergie, Lackkratzer, Spinnennetz-Risse in
   Scheiben, flackernde Scheinwerfer, abfallende Teile (Motorhaube, Stoßfänger, Spoiler, Spiegel),
   Motorrauch unter 40 % Zustand, Totalschaden mit Zeitlupen-Crashkamera und brennendem Motor.
