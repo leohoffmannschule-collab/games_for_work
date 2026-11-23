@@ -8184,6 +8184,16 @@ function classifyLower(t, s, c) {
   const zr = (t.fOver + t.wb) / t.L;
   const Ra = (t.wheelR + 0.075) / t.L;
   if (cr <= 8) return 'under';
+  // Kabinenöffnung
+  if (cr >= 22 && s > t.ws0 + 0.004 && s < t.rw1 - 0.004) return 'none';
+  // Scheinwerfer (geschwungene Form)
+  const hs0 = 0.018;
+  const hs1 = t.boxy ? 0.06 : 0.1;
+  if (s > hs0 && s < hs1 && cr >= 15 && cr <= 22) {
+    const u = (s - hs0) / (hs1 - hs0);
+    const lowEdge = 15.5 + u * 3.5;
+    if (cr >= lowEdge - 0.5 && cr <= 20.5 - u * 1.2) return 'head' + side;
+  }
   // Heckpartie (Rundungszone ab s = 0.968 bildet die Heckfläche): Leuchten folgen der Kontur
   if (s > 0.95) {
     const rearFace = s > 0.968;
@@ -8815,7 +8825,7 @@ function carSharedMaterials() {
   CARMAT.carbon = new THREE.MeshPhysicalMaterial({ map: L.carbon.map, normalMap: L.carbon.normalMap, roughness: 0.3, metalness: 0.2, clearcoat: 1, clearcoatRoughness: 0.06 });
   CARMAT.carbon.map.repeat.set(3, 3);
   CARMAT.leather = new THREE.MeshStandardMaterial({ map: L.leather.map, normalMap: L.leather.normalMap, roughnessMap: L.leather.orm, roughness: 1 });
-  CARMAT.dash = new THREE.MeshStandardMaterial({ map: L.plastic.map, normalMap: L.plastic.normalMap, roughness: 0.75, color: 0xcccccc });
+  CARMAT.dash = new THREE.MeshStandardMaterial({ map: L.plastic.map, normalMap: L.plastic.normalMap, roughness: 0.8, color: 0x4a4a52 });
   CARMAT.mirror = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.02, metalness: 1.0 });
   CARMAT.driver = new THREE.MeshStandardMaterial({ color: 0x23262e, roughness: 0.85 });
   CARMAT.skin = new THREE.MeshStandardMaterial({ color: 0x9c6b4e, roughness: 0.7 });
@@ -9062,10 +9072,12 @@ class CarVisual {
       this.addMesh(gridPanel(cab, isOne(clsC, 'roof'), { gap: gap * 0.5 }), roofPaint, { deform: true });
       this.addMesh(gridPanel(cab, isOne(clsC, 'pillar'), {}), this.opts.blackPillars ? M.trim : this.paint, { deform: true });
       this.addMesh(gridPanel(cab, isOne(clsC, 'trim'), {}), M.trim, { deform: true });
+      // Spielerwagen: eigene Scheibenmaterial-Instanz (im Cockpit klarer, ohne Spiegelschleier)
+      this.glassMat = this.opts.player ? M.glass.clone() : M.glass;
       for (const gname of ['glassF', 'glassB', 'glassSR', 'glassSL']) {
         const geo = gridPanel(cab, isOne(clsC, gname), { gap: 0.006, offset: -0.004 });
         if (!geo) continue;
-        const mesh = this.addMesh(geo, M.glass, { deform: true, cast: false, noAO: true });
+        const mesh = this.addMesh(geo, this.glassMat, { deform: true, cast: false, noAO: true });
         mesh.renderOrder = 2;
         this.glass[gname] = { mesh, cracked: 0, canvas: null, overlay: null };
       }
@@ -9374,8 +9386,8 @@ class CarVisual {
       this.body.add(cons);
       // Lenkrad (dreht beim Lenken mit)
       this.steerCol = new THREE.Group();
-      this.steerCol.position.set(xDrv, dashY + 0.36, zDash + 0.3);
-      this.steerCol.rotation.x = -0.38;
+      this.steerCol.position.set(xDrv, dashY + 0.3, zDash + 0.24);
+      this.steerCol.rotation.x = -0.42;
       this.steerWheel = new THREE.Mesh(steeringWheelGeometry(), CARMAT.leather);
       this.steerCol.add(this.steerWheel);
       this.body.add(this.steerCol);
@@ -9383,9 +9395,15 @@ class CarVisual {
       this.gauges = new GaugeDisplay();
       this.gauges.draw(0, 0.1, 'N', 1, 7000, 100);
       const gm = new THREE.Mesh(new THREE.PlaneGeometry(0.36, 0.14), new THREE.MeshBasicMaterial({ map: this.gauges.tex, toneMapped: true, color: new THREE.Color(1.6, 1.6, 1.6) }));
-      gm.position.set(xDrv, dashY + 0.33, zDash + 0.14);
-      gm.rotation.x = -0.32;
+      // über dem Lenkradkranz sichtbar, in einer Hutze
+      gm.position.set(xDrv, dashY + 0.4, zDash + 0.02);
+      gm.rotation.x = -0.2;
       this.body.add(gm);
+      const visor = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.025, 0.15), CARMAT.trim);
+      visor.position.set(xDrv, dashY + 0.485, zDash + 0.0);
+      const back = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.2, 0.02), CARMAT.trim);
+      back.position.set(xDrv, dashY + 0.4, zDash - 0.055);
+      this.body.add(visor, back);
       const scr = new THREE.Mesh(new THREE.PlaneGeometry(0.2, 0.12), new THREE.MeshBasicMaterial({ color: new THREE.Color(0.25, 0.6, 1.2) }));
       scr.position.set(0, dashY + 0.27, zDash + 0.12);
       scr.rotation.x = -0.5;
@@ -9396,7 +9414,7 @@ class CarVisual {
       this.body.add(rm);
     }
     // Kamerapunkte
-    this.cockpitEye = new THREE.Vector3(xDrv, seatY + 0.86 - t.phys.cgH, zSeat + 0.04);
+    this.cockpitEye = new THREE.Vector3(xDrv, seatY + 0.86 - t.phys.cgH, zSeat + 0.14);
     this.hoodEye = new THREE.Vector3(0, P.top(t.ws0 * 0.85) + 0.18 - t.phys.cgH, this.zAt(t.ws0 * 0.85));
   }
   buildLightbar() {
@@ -15914,7 +15932,12 @@ class Game {
     const la = _v1.copy(this.acc).applyQuaternion(_qInv);
     vis.body.rotation.x = damp(vis.body.rotation.x, clamp(la.z * 0.0035, -0.04, 0.04), 8, dt);
     vis.body.rotation.z = damp(vis.body.rotation.z, clamp(la.x * 0.0045, -0.05, 0.05), 8, dt);
-    if (vis.gauges && this.camRig.mode === 2 && (this.frameG = (this.frameG || 0) + 1) % 3 === 0) vis.gauges.draw(P.kmh, P.rpm / P.redline, P.gearLabel(), P.nitro, P.redline, P.health);
+    const cockpit = this.camRig.mode === 2 && !this.camRig.special;
+    if (vis.glassMat && vis.glassMat !== CARMAT.glass) {
+      vis.glassMat.opacity = cockpit ? 0.2 : 0.74;
+      vis.glassMat.envMapIntensity = cockpit ? 0.35 : 1.8;
+    }
+    if (vis.gauges && cockpit && (this.frameG = (this.frameG || 0) + 1) % 3 === 0) vis.gauges.draw(P.kmh, P.rpm / P.redline, P.gearLabel(), P.nitro, P.redline, P.health);
     for (const u of this.police.units) doVis(u.veh, u.visual, true);
     for (const r of this.race.racers) if (!r.isPlayer) doVis(r.veh, r.visual, this.atm.lightsOn);
   }
