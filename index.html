@@ -2412,7 +2412,7 @@ function makeFacadeMaterial() {
             float blind = step( 0.72, rh2 ) * step( 1.0 - fract( rh * 7.0 ) * 0.6, ( f.y - my0 ) / ( my1 - my0 ) );
             vec3 interior = roomCol * ( ambientRoom + lit * lightC * 1.15 );
             interior = mix( interior, vec3( 0.8, 0.75, 0.65 ) * ( ambientRoom + lit * 0.85 ), blind );
-            if ( shop > 0.5 ) interior *= 1.0 + uNight * 1.5;
+            if ( shop > 0.5 ) interior *= 1.0 + uNight * 0.55;
             base = mix( interior * 0.35, glassCol, glassMetal * 0.6 );
             facEmissive = interior * ( 0.3 + 0.7 * uNight ) * ( 1.0 - glassMetal * 0.45 );
             rough = glassRough;
