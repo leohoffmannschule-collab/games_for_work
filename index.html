@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>Vice Coast – Street Racing &amp; Open World</title>
+<title>Vice Coast</title>
 <meta name="description" content="3D-Renn- und Open-World-Spiel in einer einzigen HTML-Datei: prozedurale Welt, Sim-Fahrphysik, Schadensmodell, Polizeiverfolgung, Tuning-Werkstatt und fünf Rennstrecken." />
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%23ff2d95'/%3E%3Cstop offset='1' stop-color='%23ff9f43'/%3E%3C/linearGradient%3E%3C/defs%3E%3Ccircle cx='50' cy='50' r='46' fill='url(%23g)'/%3E%3Cpath d='M22 62 L50 26 L78 62 Z' fill='%23140a24'/%3E%3C/svg%3E" />
 <style>
@@ -21,11 +21,15 @@
   --text: #f4f1ff;
   --muted: #a9a3c4;
   --font: "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --bg: #05040a;
+  /* bewusst nur ein dunkles Erscheinungsbild (Neon-Nacht) */
+  color-scheme: dark;
 }
 * { box-sizing: border-box; }
-html, body {
+html { height: 100%; overflow: hidden; background: var(--bg); }
+body {
   margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden;
-  background: #05040a; color: var(--text); font-family: var(--font);
+  background: var(--bg); color: var(--text); font-family: var(--font);
   -webkit-user-select: none; user-select: none; -webkit-font-smoothing: antialiased;
 }
 canvas#gl { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; outline: none; }
@@ -100,7 +104,7 @@ button { font-family: var(--font); }
 /* ---------- garage ---------- */
 #garageUI { pointer-events: none; }
 #garageUI > * { pointer-events: auto; }
-#garageLeft { position: absolute; left: 18px; top: 18px; bottom: 18px; width: min(390px, 44vw); display: flex; flex-direction: column; padding: 16px; }
+#garageLeft { position: absolute; left: calc(18px + env(safe-area-inset-left, 0px)); top: calc(18px + env(safe-area-inset-top, 0px)); bottom: calc(18px + env(safe-area-inset-bottom, 0px)); width: min(390px, 44vw); display: flex; flex-direction: column; padding: 16px; }
 #garageLeft h2 { font-size: 26px; }
 .tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 12px; }
 .tab { padding: 8px 11px; border-radius: 8px; border: 1px solid var(--line); background: rgba(255,255,255,0.04); color: var(--text); cursor: pointer; font-size: 12px; font-weight: 700; letter-spacing: .8px; text-transform: uppercase; }
@@ -123,7 +127,7 @@ button { font-family: var(--font); }
 .levels i { width: 16px; height: 8px; border-radius: 3px; background: rgba(255,255,255,0.14); }
 .levels i.on { background: linear-gradient(90deg, var(--cyan), #8ff3ff); box-shadow: 0 0 8px rgba(45,226,255,0.6); }
 .slider { width: 100%; accent-color: var(--pink); }
-#garageRight { position: absolute; right: 18px; top: 18px; width: min(330px, 40vw); padding: 16px; }
+#garageRight { position: absolute; right: calc(18px + env(safe-area-inset-right, 0px)); top: calc(18px + env(safe-area-inset-top, 0px)); width: min(330px, 40vw); padding: 16px; }
 .stat { margin: 9px 0; }
 .stat .lbl { display: flex; justify-content: space-between; font-size: 12px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: #ddd8f5; }
 .stat .track { position: relative; height: 8px; border-radius: 5px; background: rgba(255,255,255,0.1); overflow: hidden; margin-top: 5px; }
@@ -132,12 +136,12 @@ button { font-family: var(--font); }
 .stat .track i.prev { background: rgba(61, 220, 132, 0.85); }
 #garageMoney { font-size: 24px; font-weight: 900; color: var(--green); margin-bottom: 8px; }
 #garageCond { font-size: 13px; color: var(--muted); margin-top: 10px; line-height: 1.5; }
-#garageBottom { position: absolute; right: 18px; bottom: 18px; display: flex; gap: 10px; }
-#garageHint { position: absolute; left: 50%; bottom: 22px; transform: translateX(-50%); font-size: 12px; color: rgba(255,255,255,0.65); letter-spacing: 1px; text-shadow: 0 1px 4px #000; pointer-events: none !important; }
+#garageBottom { position: absolute; right: calc(18px + env(safe-area-inset-right, 0px)); bottom: calc(18px + env(safe-area-inset-bottom, 0px)); display: flex; gap: 10px; }
+#garageHint { position: absolute; left: 50%; bottom: calc(22px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); font-size: 12px; color: rgba(255,255,255,0.65); letter-spacing: 1px; text-shadow: 0 1px 4px #000; pointer-events: none !important; }
 
 /* ---------- HUD ---------- */
 #hud { position: fixed; inset: 0; z-index: 10; pointer-events: none; }
-#minimapWrap { position: absolute; left: 26px; bottom: 26px; width: 236px; }
+#minimapWrap { position: absolute; left: calc(26px + env(safe-area-inset-left, 0px)); bottom: calc(26px + env(safe-area-inset-bottom, 0px)); width: 236px; }
 #minimap { width: 236px; height: 236px; display: block; border-radius: 50%; box-shadow: 0 0 0 3px rgba(0,0,0,0.55), 0 0 0 5px rgba(255,255,255,0.18), 0 10px 30px rgba(0,0,0,0.5); }
 .mm-bars { display: flex; gap: 4px; margin-top: 9px; padding: 0 14px; }
 .mm-bars .bar { flex: 1; height: 7px; border-radius: 4px; background: rgba(0,0,0,0.55); overflow: hidden; box-shadow: 0 0 0 1px rgba(255,255,255,0.12); }
@@ -149,9 +153,9 @@ button { font-family: var(--font); }
 .mm-bars .bar.focus i { background: linear-gradient(90deg, #ffb000, #ffe27a); }
 .mm-labels { display: flex; gap: 4px; padding: 0 14px; margin-top: 3px; font-size: 9px; letter-spacing: 1.2px; color: rgba(255,255,255,0.6); text-transform: uppercase; }
 .mm-labels span { flex: 1; } .mm-labels span:first-child { flex: 1.6; }
-#speedo { position: absolute; right: 22px; bottom: 16px; width: 300px; height: 210px; }
+#speedo { position: absolute; right: calc(22px + env(safe-area-inset-right, 0px)); bottom: calc(16px + env(safe-area-inset-bottom, 0px)); width: 300px; height: 210px; }
 #speedoCanvas { width: 300px; height: 210px; }
-#topRight { position: absolute; right: 26px; top: 22px; text-align: right; }
+#topRight { position: absolute; right: calc(26px + env(safe-area-inset-right, 0px)); top: calc(22px + env(safe-area-inset-top, 0px)); text-align: right; }
 #stars { font-size: 34px; letter-spacing: 3px; line-height: 1; }
 #stars span { color: rgba(255,255,255,0.18); text-shadow: 0 2px 6px rgba(0,0,0,0.7); -webkit-text-stroke: 1px rgba(0,0,0,0.6); }
 #stars span.on { color: #fff; text-shadow: 0 0 10px rgba(255,255,255,0.8), 0 2px 6px rgba(0,0,0,0.8); }
@@ -170,12 +174,12 @@ button { font-family: var(--font); }
 .msg.out { animation: msgOut .45s ease-in both; }
 @keyframes msgIn { from { opacity: 0; transform: scale(1.35); filter: blur(6px); } to { opacity: 1; transform: scale(1); filter: blur(0); } }
 @keyframes msgOut { to { opacity: 0; transform: translateY(-20px) scale(.95); } }
-#toasts { position: absolute; left: 26px; top: 22px; display: flex; flex-direction: column; gap: 8px; max-width: 380px; }
+#toasts { position: absolute; left: calc(26px + env(safe-area-inset-left, 0px)); top: calc(22px + env(safe-area-inset-top, 0px)); display: flex; flex-direction: column; gap: 8px; max-width: 380px; }
 .toast { padding: 10px 14px; border-radius: 10px; background: rgba(10, 8, 20, 0.72); border-left: 4px solid var(--cyan); font-size: 14px; font-weight: 600; animation: toastIn .3s ease-out both; backdrop-filter: blur(6px); }
 .toast.warn { border-left-color: var(--orange); } .toast.bad { border-left-color: var(--red); } .toast.good { border-left-color: var(--green); }
 @keyframes toastIn { from { opacity: 0; transform: translateX(-20px); } to { opacity: 1; transform: none; } }
 #prompt { position: absolute; left: 50%; bottom: 120px; transform: translateX(-50%); padding: 12px 20px; border-radius: 12px; background: rgba(10, 8, 20, 0.78); font-weight: 700; font-size: 16px; border: 1px solid rgba(255,255,255,0.18); }
-#raceHud { position: absolute; left: 50%; top: 18px; transform: translateX(-50%); display: flex; gap: 12px; }
+#raceHud { position: absolute; left: 50%; top: calc(18px + env(safe-area-inset-top, 0px)); transform: translateX(-50%); display: flex; gap: 12px; }
 #raceHud .box { padding: 8px 16px; border-radius: 12px; background: rgba(10, 8, 20, 0.7); text-align: center; min-width: 96px; border: 1px solid rgba(255,255,255,0.12); }
 #raceHud .box b { display: block; font-size: 26px; font-weight: 900; font-style: italic; line-height: 1.05; }
 #raceHud .box span { font-size: 10px; letter-spacing: 2px; color: var(--muted); text-transform: uppercase; }
@@ -208,8 +212,8 @@ button { font-family: var(--font); }
 .help-grid { display: grid; grid-template-columns: auto 1fr; gap: 7px 14px; font-size: 14px; align-items: center; }
 #rotateHint { position: fixed; inset: 0; z-index: 80; background: #05040a; display: none; align-items: center; justify-content: center; text-align: center; padding: 30px; font-size: 18px; }
 @media (max-width: 760px) {
-  #minimapWrap { width: 168px; left: 12px; bottom: 12px; } #minimap { width: 168px; height: 168px; }
-  #speedo { transform: scale(0.72); transform-origin: right bottom; right: 8px; bottom: 8px; }
+  #minimapWrap { width: 168px; left: calc(12px + env(safe-area-inset-left, 0px)); bottom: calc(12px + env(safe-area-inset-bottom, 0px)); } #minimap { width: 168px; height: 168px; }
+  #speedo { transform: scale(0.72); transform-origin: right bottom; right: calc(8px + env(safe-area-inset-right, 0px)); bottom: calc(8px + env(safe-area-inset-bottom, 0px)); }
   #garageLeft { width: calc(100vw - 36px); bottom: 42vh; } #garageRight { display: none; }
 }
 </style>
